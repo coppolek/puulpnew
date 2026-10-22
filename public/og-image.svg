@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630">
+  <defs>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,700;9..144,900&amp;family=IBM+Plex+Mono:wght@500;700&amp;display=swap');
+      .title { font-family: 'Fraunces', Georgia, serif; font-weight: 900; font-size: 88px; fill: #1c1917; letter-spacing: -2px; }
+      .accent { fill: #ea580c; }
+      .subtitle { font-family: 'Fraunces', Georgia, serif; font-weight: 700; font-size: 38px; fill: #44403c; }
+      .meta { font-family: 'IBM Plex Mono', monospace; font-size: 20px; font-weight: 700; fill: #78716c; letter-spacing: 2px; text-transform: uppercase; }
+      .badge { font-family: 'IBM Plex Mono', monospace; font-size: 18px; font-weight: 700; fill: #ea580c; }
+    </style>
+  </defs>
+
+  <!-- Background Newsprint Texture -->
+  <rect width="1200" height="630" fill="#fbf9f4" />
+  
+  <!-- Double Newspaper Border -->
+  <rect x="30" y="30" width="1140" height="570" fill="none" stroke="#292524" stroke-width="4" />
+  <rect x="40" y="40" width="1120" height="550" fill="none" stroke="#292524" stroke-width="1.5" />
+
+  <!-- Top Masthead Bar -->
+  <line x1="40" y1="120" x2="1160" y2="120" stroke="#292524" stroke-width="2" />
+  <text x="70" y="90" class="meta">EDIZIONE DIGITALE NAZIONALE · CONDIVISIONE NOTIZIE &amp; RSS 2.0</text>
+  <text x="1020" y="90" class="badge">LIVE 24/7</text>
+
+  <!-- Central Brand Logo -->
+  <text x="70" y="240" class="title">puulp<tspan class="accent">.it</tspan></text>
+
+  <!-- Main Headline Subtitle -->
+  <text x="70" y="320" class="subtitle">Rassegna Stampa, Pagine Tematiche e Notifiche Live</text>
+
+  <line x1="70" y1="360" x2="1130" y2="360" stroke="#d6d3d1" stroke-width="1.5" stroke-dasharray="6,6" />
+
+  <!-- Descriptions / Pills -->
+  <text x="70" y="420" class="meta" style="fill: #57534e; font-size: 22px; letter-spacing: 0.5px;">
+    Crea pagine personalizzate con i tuoi feed preferiti, effettua ricerche in tempo reale
+  </text>
+  <text x="70" y="455" class="meta" style="fill: #57534e; font-size: 22px; letter-spacing: 0.5px;">
+    e ricevi aggiornamenti immediati sui nuovi articoli.
+  </text>
+
+  <!-- Bottom Badges / Feature Tags -->
+  <g transform="translate(70, 500)">
+    <!-- Tag 1 -->
+    <rect x="0" y="0" width="280" height="42" fill="#ea580c" />
+    <text x="140" y="27" text-anchor="middle" font-family="'IBM Plex Mono', monospace" font-size="16" font-weight="700" fill="#ffffff">FEED RSS &amp; AGGREGAZIONE</text>
+
+    <!-- Tag 2 -->
+    <rect x="300" y="0" width="260" height="42" fill="#292524" />
+    <text x="430" y="27" text-anchor="middle" font-family="'IBM Plex Mono', monospace" font-size="16" font-weight="700" fill="#ffffff">NOTIFICHE IN TEMPO REALE</text>
+
+    <!-- Tag 3 -->
+    <rect x="580" y="0" width="240" height="42" fill="none" stroke="#292524" stroke-width="2" />
+    <text x="700" y="27" text-anchor="middle" font-family="'IBM Plex Mono', monospace" font-size="16" font-weight="700" fill="#292524">RICERCA ISTANTANEA</text>
+  </g>
+
+  <!-- Corner RSS Graphic -->
+  <g transform="translate(1010, 160)" stroke="#ea580c" stroke-width="10" fill="none" stroke-linecap="round">
+    <path d="M0 60 a60 60 0 0 1 60 60" />
+    <path d="M0 20 a100 100 0 0 1 100 100" />
+    <circle cx="10" cy="110" r="10" fill="#ea580c" stroke="none" />
+  </g>
+</svg>

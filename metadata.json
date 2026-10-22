@@ -1,0 +1,6 @@
+{
+  "name": "puulp.it",
+  "description": "Rassegna stampa, pagine tematiche personalizzate, feed RSS unificati e notifiche in tempo reale.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

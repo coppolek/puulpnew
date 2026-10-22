@@ -1,0 +1,191 @@
+{
+  "entities": {
+    "Feed": {
+      "title": "Feed",
+      "description": "Feed RSS generato e memorizzato nel database",
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "Indirizzo della pagina sorgente",
+          "minLength": 5,
+          "maxLength": 2048
+        },
+        "title": {
+          "type": "string",
+          "description": "Titolo del feed RSS",
+          "maxLength": 500
+        },
+        "description": {
+          "type": "string",
+          "description": "Descrizione del feed o del sito",
+          "maxLength": 2000
+        },
+        "interval": {
+          "type": "number",
+          "description": "Intervallo di controllo in minuti"
+        },
+        "itemsCount": {
+          "type": "number",
+          "description": "Numero di articoli estratti"
+        },
+        "lastCheckedAt": {
+          "type": "string",
+          "description": "Data e ora dell'ultimo scraping"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Data di creazione del feed"
+        },
+        "xml": {
+          "type": "string",
+          "description": "Output XML conforme a RSS 2.0",
+          "maxLength": 500000
+        },
+        "items": {
+          "type": "array",
+          "description": "Elenco degli articoli estratti"
+        },
+        "pageId": {
+          "type": "string",
+          "description": "ID della pagina tematica a cui appartiene il feed",
+          "maxLength": 128
+        }
+      },
+      "required": ["url", "title", "interval", "xml"]
+    },
+    "Page": {
+      "title": "Page",
+      "description": "Pagina personalizzata con menu e feed aggregati",
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "Nome o titolo della pagina",
+          "minLength": 2,
+          "maxLength": 200
+        },
+        "slug": {
+          "type": "string",
+          "description": "Identificativo URL della pagina",
+          "minLength": 2,
+          "maxLength": 100,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "description": {
+          "type": "string",
+          "description": "Descrizione della pagina o dell'argomento",
+          "maxLength": 2000
+        },
+        "category": {
+          "type": "string",
+          "description": "Categoria o etichetta del menu",
+          "maxLength": 100
+        },
+        "feedIds": {
+          "type": "array",
+          "description": "Elenco degli ID dei feed inclusi in questa pagina"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Data di creazione della pagina"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Data dell'ultimo aggiornamento"
+        }
+      },
+      "required": ["title", "slug"]
+    },
+    "Subscription": {
+      "title": "Subscription",
+      "description": "Iscrizione del visitatore alle notifiche in tempo reale",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "description": "Email del visitatore per le notifiche",
+          "minLength": 5,
+          "maxLength": 256
+        },
+        "pages": {
+          "type": "array",
+          "description": "Elenco delle pagine selezionate dall'utente"
+        },
+        "notifyBrowser": {
+          "type": "boolean",
+          "description": "Abilitazione notifiche push del browser"
+        },
+        "notifyInApp": {
+          "type": "boolean",
+          "description": "Abilitazione notifiche in-app in tempo reale"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Data di registrazione"
+        },
+        "userId": {
+          "type": "string",
+          "description": "ID utente opzionale",
+          "maxLength": 128
+        }
+      },
+      "required": ["email", "pages"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "Notifica di nuovo articolo pubblicato",
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "Titolo della notifica",
+          "maxLength": 300
+        },
+        "message": {
+          "type": "string",
+          "description": "Testo o sommario della notifica",
+          "maxLength": 1000
+        },
+        "link": {
+          "type": "string",
+          "description": "Link dell'articolo",
+          "maxLength": 2048
+        },
+        "pageId": {
+          "type": "string",
+          "description": "ID della pagina a cui appartiene",
+          "maxLength": 128
+        },
+        "feedTitle": {
+          "type": "string",
+          "description": "Nome della fonte",
+          "maxLength": 200
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Data di emissione"
+        }
+      },
+      "required": ["title", "link", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/feeds/{feedId}": {
+      "schema": "Feed",
+      "description": "Raccolta di tutti i feed RSS generati e salvati"
+    },
+    "/pages/{pageId}": {
+      "schema": "Page",
+      "description": "Raccolta delle pagine tematiche create dall'utente"
+    },
+    "/subscriptions/{subscriptionId}": {
+      "schema": "Subscription",
+      "description": "Iscrizioni dei visitatori alle notifiche in tempo reale"
+    },
+    "/notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "Notifiche broadcast in tempo reale per nuovi articoli"
+    }
+  }
+}

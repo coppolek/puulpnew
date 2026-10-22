@@ -1,0 +1,94 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net: default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function isValidFeed(data) {
+      return data.keys().hasAll(['url', 'title', 'interval', 'xml'])
+        && data.keys().hasOnly(['url', 'title', 'description', 'interval', 'itemsCount', 'lastCheckedAt', 'createdAt', 'xml', 'items', 'pageId'])
+        && data.url is string && data.url.size() >= 5 && data.url.size() <= 2048
+        && data.title is string && data.title.size() <= 500
+        && (!('description' in data) || (data.description is string && data.description.size() <= 2000))
+        && data.interval is number && data.interval >= 15 && data.interval <= 1440
+        && (!('itemsCount' in data) || data.itemsCount is number)
+        && (!('lastCheckedAt' in data) || (data.lastCheckedAt is string && data.lastCheckedAt.size() <= 100))
+        && (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 100))
+        && data.xml is string && data.xml.size() <= 500000
+        && (!('items' in data) || (data.items is list && data.items.size() <= 50))
+        && (!('pageId' in data) || (data.pageId is string && data.pageId.size() <= 128));
+    }
+
+    function isValidPage(data) {
+      return data.keys().hasAll(['title', 'slug'])
+        && data.keys().hasOnly(['title', 'slug', 'description', 'category', 'feedIds', 'createdAt', 'updatedAt'])
+        && data.title is string && data.title.size() >= 2 && data.title.size() <= 200
+        && data.slug is string && data.slug.size() >= 2 && data.slug.size() <= 100 && data.slug.matches('^[a-zA-Z0-9_-]+$')
+        && (!('description' in data) || (data.description is string && data.description.size() <= 2000))
+        && (!('category' in data) || (data.category is string && data.category.size() <= 100))
+        && (!('feedIds' in data) || (data.feedIds is list && data.feedIds.size() <= 100))
+        && (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 100))
+        && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 100));
+    }
+
+    function isValidSubscription(data) {
+      return data.keys().hasAll(['email', 'pages'])
+        && data.keys().hasOnly(['email', 'pages', 'notifyBrowser', 'notifyInApp', 'createdAt', 'userId'])
+        && data.email is string && data.email.size() >= 5 && data.email.size() <= 256
+        && data.pages is list && data.pages.size() <= 100
+        && (!('notifyBrowser' in data) || data.notifyBrowser is bool)
+        && (!('notifyInApp' in data) || data.notifyInApp is bool)
+        && (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 100))
+        && (!('userId' in data) || (data.userId is string && data.userId.size() <= 128));
+    }
+
+    function isValidNotification(data) {
+      return data.keys().hasAll(['title', 'link', 'createdAt'])
+        && data.keys().hasOnly(['title', 'message', 'link', 'pageId', 'feedTitle', 'createdAt'])
+        && data.title is string && data.title.size() <= 300
+        && data.link is string && data.link.size() <= 2048
+        && (!('message' in data) || (data.message is string && data.message.size() <= 1000))
+        && (!('pageId' in data) || (data.pageId is string && data.pageId.size() <= 128))
+        && (!('feedTitle' in data) || (data.feedTitle is string && data.feedTitle.size() <= 200))
+        && data.createdAt is string && data.createdAt.size() <= 100;
+    }
+
+    match /feeds/{feedId} {
+      allow get, list: if true;
+      allow create: if isValidId(feedId) && isValidFeed(incoming());
+      allow update: if isValidId(feedId) && isValidFeed(incoming());
+      allow delete: if isValidId(feedId);
+    }
+
+    match /pages/{pageId} {
+      allow get, list: if true;
+      allow create: if isValidId(pageId) && isValidPage(incoming());
+      allow update: if isValidId(pageId) && isValidPage(incoming());
+      allow delete: if isValidId(pageId);
+    }
+
+    match /subscriptions/{subId} {
+      allow get, list: if true;
+      allow create: if isValidId(subId) && isValidSubscription(incoming());
+      allow update: if isValidId(subId) && isValidSubscription(incoming());
+      allow delete: if isValidId(subId);
+    }
+
+    match /notifications/{notifId} {
+      allow get, list: if true;
+      allow create: if isValidId(notifId) && isValidNotification(incoming());
+      allow update: if isValidId(notifId) && isValidNotification(incoming());
+      allow delete: if isValidId(notifId);
+    }
+  }
+}

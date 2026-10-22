@@ -1,0 +1,82 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --radius: 0.25rem;
+    --background: #ffffff;
+    --foreground: oklch(18% 0.02 60);
+    --card: #ffffff;
+    --card-foreground: oklch(18% 0.02 60);
+    --popover: #ffffff;
+    --popover-foreground: oklch(18% 0.02 60);
+    --primary: oklch(62% 0.22 42);
+    --primary-foreground: #ffffff;
+    --secondary: #f4f4f5;
+    --secondary-foreground: oklch(18% 0.02 60);
+    --muted: #f4f4f5;
+    --muted-foreground: oklch(48% 0.02 60);
+    --accent: #f4f4f5;
+    --accent-foreground: oklch(18% 0.02 60);
+    --destructive: oklch(57.7% 0.245 27.325);
+    --destructive-foreground: #ffffff;
+    --border: oklch(22% 0.02 60);
+    --input: oklch(22% 0.02 60);
+    --ring: oklch(62% 0.22 42);
+  }
+
+  body {
+    background-color: #ffffff;
+    color: var(--foreground);
+    font-family: 'IBM Plex Mono', monospace;
+    min-height: 100vh;
+  }
+
+  ::selection {
+    background-color: var(--primary);
+    color: var(--primary-foreground);
+  }
+}
+
+@theme {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --font-serif: Fraunces, Georgia, serif;
+  --font-mono: 'IBM Plex Mono', monospace;
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* Hide scrollbar for clean horizontal mobile swipes */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Safe area padding for mobile home indicator */
+.pb-safe {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}

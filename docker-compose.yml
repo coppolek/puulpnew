@@ -1,0 +1,18 @@
+services:
+  puulp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: puulp-it:latest
+    container_name: puulp_app
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

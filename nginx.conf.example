@@ -1,0 +1,75 @@
+# Configurazione Nginx Reverse Proxy per puulp.it su Hostinger VPS
+# Posizione file consigliata: /etc/nginx/sites-available/puulp.it
+# Abilitazione: ln -s /etc/nginx/sites-available/puulp.it /etc/nginx/sites-enabled/
+# Test sintassi: nginx -t
+# Riavvio: systemctl reload nginx
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name puulp.it www.puulp.it;
+
+    # Redirect automatico HTTP -> HTTPS
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name puulp.it www.puulp.it;
+
+    # Certificati SSL (generati con: certbot --nginx -d puulp.it -d www.puulp.it)
+    ssl_certificate /etc/letsencrypt/live/puulp.it/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/puulp.it/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
+
+    # Compressione Gzip per massime prestazioni
+    gzip on;
+    gzip_vary on;
+    gzip_proxied any;
+    gzip_comp_level 6;
+    gzip_types text/plain text/css text/xml application/json application/javascript application/rss+xml image/svg+xml;
+
+    # Sicurezza & Header
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+
+    # Log di accesso ed errori
+    access_log /var/log/nginx/puulp.it.access.log;
+    error_log /var/log/nginx/puulp.it.error.log;
+
+    # Proxy verso Node.js (PM2 porta 3000)
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+
+        # Timeout generosi per le operazioni di scraping degli RSS
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+
+    # Cache statica ottimizzata per gli asset compilati Vite
+    location /assets/ {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host $host;
+        expires 1y;
+        add_header Cache-Control "public, max-age=31536000, immutable";
+    }
+
+    # Health check endpoint
+    location /health {
+        proxy_pass http://127.0.0.1:3000/health;
+        access_log off;
+    }
+}

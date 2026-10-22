@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>puulp.it — Rassegna Stampa, Pagine Tematiche e Feed RSS</title>
+    <meta name="description" content="puulp.it — Crea pagine tematiche con i tuoi feed preferiti, scopri le ultime notizie con ricerca in tempo reale e ricevi notifiche istantanee." />
+    
+    <!-- Open Graph / Facebook / WhatsApp / LinkedIn -->
+    <meta property="og:site_name" content="puulp.it" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="puulp.it — Rassegna Stampa e Feed RSS" />
+    <meta property="og:description" content="Pagine tematiche con feed unificati, ricerca in tempo reale, condivisione articoli e notifiche istantanee." />
+    <meta property="og:image" content="/og-image.svg" />
+    <meta property="og:image:type" content="image/svg+xml" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:locale" content="it_IT" />
+
+    <!-- Twitter / X Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="puulp.it — Rassegna Stampa e Feed RSS" />
+    <meta name="twitter:description" content="Pagine tematiche con feed unificati, ricerca in tempo reale e notifiche istantanee." />
+    <meta name="twitter:image" content="/og-image.svg" />
+
+    <!-- Google Fonts & Favicon -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,700;9..144,800&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ea580c' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 11a9 9 0 0 1 9 9'/%3E%3Cpath d='M4 4a16 16 0 0 1 16 16'/%3E%3Ccircle cx='5' cy='19' r='1' fill='%23ea580c'/%3E%3C/svg%3E" />
+
+    <!-- Schema.org JSON-LD Structured Data for News / Media & Web Application -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "WebApplication",
+          "name": "puulp.it",
+          "applicationCategory": "NewsApplication",
+          "operatingSystem": "All",
+          "description": "Piattaforma di rassegna stampa e aggregazione di feed RSS tematici con ricerca istantanea e notifiche in tempo reale.",
+          "offers": {
+            "@type": "Offer",
+            "price": "0",
+            "priceCurrency": "EUR"
+          }
+        },
+        {
+          "@type": "NewsMediaOrganization",
+          "name": "puulp.it",
+          "url": "https://puulp.it",
+          "logo": {
+            "@type": "ImageObject",
+            "url": "https://puulp.it/og-image.svg"
+          },
+          "publishingPrinciples": "https://puulp.it",
+          "description": "Rassegna stampa editoriale con feed RSS tematici, estrazione automatizzata di articoli e aggiornamenti continui."
+        }
+      ]
+    }
+    </script>
+
+    <!-- Google AdSense -->
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-5738943819550045" crossorigin="anonymous"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
