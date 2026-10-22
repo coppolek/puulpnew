@@ -1,99 +1,87 @@
-# Guida al Deploy di puulp.it su VPS Hostinger
+# Guida al Deploy di puulp.it su Hostinger (Docker & VPS)
 
-Questa guida descrive i passaggi per installare, configurare ed eseguire **puulp.it** sulla tua VPS Hostinger (con sistema operativo Ubuntu 22.04 / 24.04 LTS o Debian 12) per ottenere le massime prestazioni, SSL gratuito e riavvio automatico continuo.
+Questa guida risolve l'errore **"Distribuzione fallita"** su Hostinger e fornisce tutti i file e i passaggi pronti all'uso sia per il **Deploy Docker Automatico su Hostinger** (hPanel Docker / Git Deployment) sia per il deploy su **VPS con Docker Compose o PM2**.
 
 ---
 
-## Metodo 1: Deploy Standard con Node.js + PM2 + Nginx (Consigliato)
+## 🔍 Perché la distribuzione precedente su Hostinger falliva?
+1. **Mancanza di `.dockerignore`**: Senza `.dockerignore`, Hostinger copiava l'intera cartella locale `node_modules` nel container, creando incompatibilità di architettura binaria con l'ambiente Linux Alpine.
+2. **`npm ci` senza `package-lock.json`**: Il comando `npm ci` richiede tassativamente un file `package-lock.json` generato. Ora `package-lock.json` è presente e `Dockerfile` utilizza `npm install --legacy-peer-deps` per garantire una compilazione solida senza blocchi da peer dependencies.
+3. **Mancanza di gestione porte e healthcheck**: Hostinger monitora lo stato del container; ora il Dockerfile include l'istruzione `HEALTHCHECK` su `/health` e le porte standard `3000`.
 
-### 1. Connettiti alla tua VPS Hostinger via SSH
-Da terminale (o tramite la console web di Hostinger):
+---
+
+## 🚀 Metodo 1: Deploy Diretto su Hostinger con Docker (hPanel o Git)
+
+I file necessari sono già pronti nella radice del progetto:
+- `Dockerfile` (ottimizzato multi-stage con Node.js 22 Alpine, non-root user e healthcheck)
+- `docker-compose.yml` (porte 3000:3000, riavvio automatico e logging sicuro)
+- `.dockerignore` (esclusione di cache e file non necessari)
+- `package-lock.json` (dipendenze bloccate e compatibili)
+
+### Parametri da inserire nel pannello Hostinger (se richiesti):
+| Parametro | Valore |
+|---|---|
+| **Porta dell'applicazione (Port)** | `3000` |
+| **Dockerfile path** | `Dockerfile` |
+| **Health Check Path** | `/health` (oppure `/api/health`) |
+| **Comando di avvio (se richiesto)** | `node dist/server.js` |
+| **Variabili d'ambiente (Environment Variables)** | `NODE_ENV=production` , `PORT=3000` |
+
+---
+
+## 💻 Metodo 2: Deploy su VPS Hostinger con Docker Compose
+
+Se accedi alla tua VPS Hostinger via SSH:
+
+### 1. Connettiti alla VPS
 ```bash
 ssh root@IP_DELLA_TUA_VPS
 ```
 
-### 2. Installa Node.js 22 LTS, Nginx e Certbot
-Se non li hai ancora installati:
-```bash
-# Aggiorna i pacchetti
-apt update && apt upgrade -y
-
-# Installa Node.js 22 LTS
-curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-apt install -y nodejs nginx certbot python3-certbot-nginx git
-
-# Installa PM2 globalmente per la gestione dei processi
-npm install -g pm2
-```
-
-### 3. Clona o carica il progetto sulla VPS
-Crea una cartella per il sito (es. in `/var/www/puulp`):
-```bash
-mkdir -p /var/www/puulp
-cd /var/www/puulp
-
-# Se usi Git:
-# git clone <URL_TUO_REPOSITORY> .
-
-# Oppure carica i file del progetto via SFTP (FileZilla/Cyberduck)
-```
-
-### 4. Installa le dipendenze e compila per la produzione
+### 2. Entra nella cartella del progetto
 ```bash
 cd /var/www/puulp
-
-# Installa i pacchetti
-npm ci
-
-# Compila sia l'app React/Tailwind (in dist/) sia il server backend (in dist/server.js)
-npm run build
 ```
 
-### 5. Avvia l'applicazione con PM2
-Utilizza il file di configurazione pre-ottimizzato `ecosystem.config.cjs` già incluso:
+### 3. Avvia il container Docker
 ```bash
-# Avvia in modalità produzione
-pm2 start ecosystem.config.cjs --env production
-
-# Configura il riavvio automatico al riavvio del server
-pm2 save
-pm2 startup
+docker compose up -d --build
 ```
 
-Puoi verificare lo stato in qualsiasi momento con:
+### 4. Verifica lo stato e i log
 ```bash
-pm2 status
-pm2 logs puulp-it
+docker compose ps
+docker compose logs -f
 ```
 
-Verifica rapida del funzionamento locale:
+### 5. Verifica che risponda
 ```bash
 curl http://127.0.0.1:3000/health
-# Risposta attesa: {"status":"ok","service":"puulp.it","environment":"production",...}
+# Risposta: {"status":"ok","service":"puulp.it","environment":"production"}
 ```
 
 ---
 
-### 6. Configura Nginx come Reverse Proxy e Attiva SSL
+## 🌐 Metodo 3: Deploy VPS con Node.js + PM2 + Nginx
 
-1. Crea il file di configurazione per il tuo dominio:
+Se preferisci eseguire l'app direttamente su Node.js senza Docker:
+
 ```bash
-nano /etc/nginx/sites-available/puulp.it
+cd /var/www/puulp
+npm install --legacy-peer-deps
+npm run build
+pm2 start ecosystem.config.cjs --env production
+pm2 save
+pm2 startup
 ```
 
-2. Incolla la seguente configurazione (sostituisci `puulp.it` con il tuo dominio se necessario):
+### Configurazione Reverse Proxy Nginx (con SSL gratuito)
+In `/etc/nginx/sites-available/puulp.it`:
 ```nginx
 server {
     listen 80;
-    listen [::]:80;
     server_name puulp.it www.puulp.it;
-
-    # Compressione Gzip per caricamento ultra-rapido
-    gzip on;
-    gzip_vary on;
-    gzip_proxied any;
-    gzip_comp_level 6;
-    gzip_types text/plain text/css text/xml application/json application/javascript application/rss+xml image/svg+xml;
 
     location / {
         proxy_pass http://127.0.0.1:3000;
@@ -104,61 +92,10 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_cache_bypass $http_upgrade;
-
-        proxy_connect_timeout 60s;
-        proxy_read_timeout 60s;
-    }
-
-    # Cache statica ottimizzata per asset compilati
-    location /assets/ {
-        proxy_pass http://127.0.0.1:3000;
-        proxy_set_header Host $host;
-        expires 1y;
-        add_header Cache-Control "public, max-age=31536000, immutable";
     }
 }
 ```
-
-3. Abilita il sito e testa Nginx:
-```bash
-ln -s /etc/nginx/sites-available/puulp.it /etc/nginx/sites-enabled/
-nginx -t
-systemctl reload nginx
-```
-
-4. Genera il certificato SSL HTTPS gratuito con Certbot:
+Poi attiva SSL:
 ```bash
 certbot --nginx -d puulp.it -d www.puulp.it
 ```
-Segui le istruzioni a schermo. Certbot configurerà automaticamente HTTPS e il rinnovo automatico ogni 90 giorni.
-
----
-
-## Metodo 2: Deploy Rapido con Docker
-
-Se sulla tua VPS Hostinger hai installato Docker (o usi il template 1-click Docker di Hostinger):
-
-```bash
-cd /var/www/puulp
-
-# Compila l'immagine e avvia il container in background
-docker compose up -d --build
-
-# Visualizza i log
-docker compose logs -f
-```
-
-Il container espone la porta `3000` con healthcheck automatico ed è pronto per essere instradato tramite Nginx o Traefik.
-
----
-
-## Comandi Utili di Manutenzione
-
-| Operazione | Comando |
-|---|---|
-| Controlla stato server | `pm2 status` |
-| Guarda i log in tempo reale | `pm2 logs puulp-it` |
-| Riavvia l'applicazione | `pm2 restart puulp-it` |
-| Aggiorna il codice | `git pull && npm install && npm run build && pm2 reload puulp-it` |
-| Test salute applicazione | `curl http://127.0.0.1:3000/health` |

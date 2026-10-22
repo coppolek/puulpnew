@@ -5,7 +5,7 @@ services:
       dockerfile: Dockerfile
     image: puulp-it:latest
     container_name: puulp_app
-    restart: always
+    restart: unless-stopped
     ports:
       - "3000:3000"
     environment:
