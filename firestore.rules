@@ -63,6 +63,38 @@ service cloud.firestore {
         && data.createdAt is string && data.createdAt.size() <= 100;
     }
 
+    function isValidAffiliateSetting(data) {
+      return data.keys().hasAll(['affiliateId'])
+        && data.keys().hasOnly(['affiliateId', 'network', 'customParam', 'updatedAt'])
+        && data.affiliateId is string && data.affiliateId.size() >= 1 && data.affiliateId.size() <= 100
+        && (!('network' in data) || (data.network is string && data.network.size() <= 50))
+        && (!('customParam' in data) || (data.customParam is string && data.customParam.size() <= 50))
+        && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 100));
+    }
+
+    function isValidArticle(data) {
+      return data.keys().hasAll(['title', 'slug', 'pageId', 'createdAt'])
+        && data.keys().hasOnly(['title', 'slug', 'description', 'content', 'category', 'pageId', 'image', 'author', 'link', 'canonicalUrl', 'focusKeyword', 'metaTitle', 'metaDescription', 'schemaType', 'price', 'isManual', 'createdAt', 'updatedAt'])
+        && data.title is string && data.title.size() >= 3 && data.title.size() <= 300
+        && data.slug is string && data.slug.size() >= 2 && data.slug.size() <= 150 && data.slug.matches('^[a-zA-Z0-9_-]+$')
+        && data.pageId is string && data.pageId.size() <= 128
+        && (!('description' in data) || (data.description is string && data.description.size() <= 2000))
+        && (!('content' in data) || (data.content is string && data.content.size() <= 100000))
+        && (!('category' in data) || (data.category is string && data.category.size() <= 100))
+        && (!('image' in data) || (data.image is string && data.image.size() <= 2048))
+        && (!('author' in data) || (data.author is string && data.author.size() <= 100))
+        && (!('link' in data) || (data.link is string && data.link.size() <= 2048))
+        && (!('canonicalUrl' in data) || (data.canonicalUrl is string && data.canonicalUrl.size() <= 2048))
+        && (!('focusKeyword' in data) || (data.focusKeyword is string && data.focusKeyword.size() <= 100))
+        && (!('metaTitle' in data) || (data.metaTitle is string && data.metaTitle.size() <= 200))
+        && (!('metaDescription' in data) || (data.metaDescription is string && data.metaDescription.size() <= 320))
+        && (!('schemaType' in data) || (data.schemaType is string && data.schemaType.size() <= 50))
+        && (!('price' in data) || (data.price is string && data.price.size() <= 50))
+        && (!('isManual' in data) || data.isManual is bool)
+        && data.createdAt is string && data.createdAt.size() <= 100
+        && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 100));
+    }
+
     match /feeds/{feedId} {
       allow get, list: if true;
       allow create: if isValidId(feedId) && isValidFeed(incoming());
@@ -77,6 +109,13 @@ service cloud.firestore {
       allow delete: if isValidId(pageId);
     }
 
+    match /articles/{articleId} {
+      allow get, list: if true;
+      allow create: if isValidId(articleId) && isValidArticle(incoming());
+      allow update: if isValidId(articleId) && isValidArticle(incoming());
+      allow delete: if isValidId(articleId);
+    }
+
     match /subscriptions/{subId} {
       allow get, list: if true;
       allow create: if isValidId(subId) && isValidSubscription(incoming());
@@ -89,6 +128,13 @@ service cloud.firestore {
       allow create: if isValidId(notifId) && isValidNotification(incoming());
       allow update: if isValidId(notifId) && isValidNotification(incoming());
       allow delete: if isValidId(notifId);
+    }
+
+    match /affiliate_settings/{settingId} {
+      allow get, list: if true;
+      allow create: if isValidId(settingId) && isValidAffiliateSetting(incoming());
+      allow update: if isValidId(settingId) && isValidAffiliateSetting(incoming());
+      allow delete: if isValidId(settingId);
     }
   }
 }

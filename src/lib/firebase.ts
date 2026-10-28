@@ -127,6 +127,28 @@ export interface CustomPage {
   updatedAt?: string;
 }
 
+export interface ManualArticle {
+  id: string;
+  title: string;
+  slug: string;
+  description?: string;
+  content?: string;
+  category?: string;
+  pageId: string;
+  image?: string;
+  author?: string;
+  link?: string;
+  canonicalUrl?: string;
+  focusKeyword?: string;
+  metaTitle?: string;
+  metaDescription?: string;
+  schemaType?: 'NewsArticle' | 'BlogPosting' | 'Product';
+  price?: string;
+  isManual?: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}
+
 export interface VisitorSubscription {
   id: string;
   email: string;
@@ -177,6 +199,16 @@ export function generatePageId(slug: string): string {
     .replace(/[^a-zA-Z0-9_-]/g, '_')
     .slice(0, 60);
   return `page_${cleaned}`;
+}
+
+export function generateArticleId(slugOrTitle: string): string {
+  const cleaned = slugOrTitle
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]/g, '_')
+    .slice(0, 50);
+  const hash = hashString(slugOrTitle);
+  return `art_${cleaned}_${hash}`.slice(0, 80);
 }
 
 export function generateSubscriptionId(email: string): string {
@@ -382,6 +414,107 @@ export function listenToCustomPages(
 }
 
 // ----------------------------------------------------
+// MANUAL ARTICLES & SEO OPTIMIZATION
+// ----------------------------------------------------
+
+export async function saveManualArticle(
+  article: Omit<ManualArticle, 'id' | 'createdAt'> & { id?: string; createdAt?: string }
+): Promise<string> {
+  const articleId = article.id || generateArticleId(article.slug || article.title);
+  const path = `articles/${articleId}`;
+
+  const cleanSlug = (article.slug || article.title)
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'articolo';
+
+  const docData: Record<string, unknown> = {
+    title: article.title.trim().slice(0, 300),
+    slug: cleanSlug.slice(0, 150),
+    pageId: article.pageId.trim().slice(0, 128),
+    isManual: true,
+    createdAt: article.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  if (article.description) docData.description = article.description.trim().slice(0, 2000);
+  if (article.content) docData.content = article.content.trim().slice(0, 100000);
+  if (article.category) docData.category = article.category.trim().slice(0, 100);
+  if (article.image) docData.image = article.image.trim().slice(0, 2048);
+  if (article.author) docData.author = article.author.trim().slice(0, 100);
+  if (article.link) docData.link = article.link.trim().slice(0, 2048);
+  if (article.canonicalUrl) docData.canonicalUrl = article.canonicalUrl.trim().slice(0, 2048);
+  if (article.focusKeyword) docData.focusKeyword = article.focusKeyword.trim().slice(0, 100);
+  if (article.metaTitle) docData.metaTitle = article.metaTitle.trim().slice(0, 200);
+  if (article.metaDescription) docData.metaDescription = article.metaDescription.trim().slice(0, 320);
+  if (article.schemaType) docData.schemaType = article.schemaType.trim().slice(0, 50);
+  if (article.price) docData.price = article.price.trim().slice(0, 50);
+
+  try {
+    await setDoc(doc(db, 'articles', articleId), docData, { merge: true });
+    return articleId;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function deleteManualArticle(articleId: string): Promise<void> {
+  const path = `articles/${articleId}`;
+  try {
+    await deleteDoc(doc(db, 'articles', articleId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export function listenToManualArticles(
+  onData: (articles: ManualArticle[]) => void,
+  onError?: (err: Error) => void
+): Unsubscribe {
+  const path = 'articles';
+  return onSnapshot(
+    collection(db, path),
+    (snapshot) => {
+      const articles: ManualArticle[] = [];
+      snapshot.forEach((d) => {
+        const data = d.data();
+        articles.push({
+          id: d.id,
+          title: data.title,
+          slug: data.slug,
+          description: data.description,
+          content: data.content,
+          category: data.category,
+          pageId: data.pageId,
+          image: data.image,
+          author: data.author,
+          link: data.link,
+          canonicalUrl: data.canonicalUrl,
+          focusKeyword: data.focusKeyword,
+          metaTitle: data.metaTitle,
+          metaDescription: data.metaDescription,
+          schemaType: data.schemaType || 'NewsArticle',
+          price: data.price,
+          isManual: data.isManual !== false,
+          createdAt: data.createdAt,
+          updatedAt: data.updatedAt,
+        });
+      });
+      // Sort newest first
+      articles.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      onData(articles);
+    },
+    (error) => {
+      if (onError) {
+        onError(error);
+      }
+      handleFirestoreError(error, OperationType.LIST, path);
+    }
+  );
+}
+
+// ----------------------------------------------------
 // VISITOR SUBSCRIPTION & REAL-TIME NOTIFICATIONS
 // ----------------------------------------------------
 
@@ -556,4 +689,123 @@ export async function signOutAdmin(): Promise<void> {
 // Listen to Auth State
 export function listenToAuthState(onChange: (user: User | null) => void): Unsubscribe {
   return onAuthStateChanged(auth, onChange);
+}
+
+// ----------------------------------------------------
+// AFFILIATE MONETIZATION & SETTINGS
+// ----------------------------------------------------
+
+export interface AffiliateSetting {
+  id?: string;
+  affiliateId: string;
+  network: 'amazon' | 'ebay' | 'awin' | 'custom_param';
+  customParam?: string;
+  updatedAt?: string;
+}
+
+export function applyAffiliateToUrl(
+  rawUrl: string,
+  affiliateId: string,
+  network: string = 'custom_param',
+  customParam: string = 'ref'
+): string {
+  if (!rawUrl || !affiliateId || !affiliateId.trim()) return rawUrl;
+  const cleanId = affiliateId.trim();
+
+  try {
+    const urlObj = new URL(rawUrl);
+
+    if (network === 'amazon' || urlObj.hostname.includes('amazon.') || urlObj.hostname.includes('amzn.')) {
+      urlObj.searchParams.delete('tag');
+      urlObj.searchParams.delete('ascsubtag');
+      urlObj.searchParams.set('tag', cleanId);
+      return urlObj.toString();
+    }
+
+    if (network === 'ebay' || urlObj.hostname.includes('ebay.')) {
+      urlObj.searchParams.set('campid', cleanId);
+      urlObj.searchParams.set('customid', 'puulp');
+      return urlObj.toString();
+    }
+
+    if (network === 'awin') {
+      urlObj.searchParams.set('awinaffid', cleanId);
+      return urlObj.toString();
+    }
+
+    const paramKey = (customParam || 'ref').trim().replace(/[^a-zA-Z0-9_-]/g, '') || 'ref';
+    urlObj.searchParams.set(paramKey, cleanId);
+    return urlObj.toString();
+  } catch {
+    const cleanParam = (customParam || 'ref').trim() || 'ref';
+    const separator = rawUrl.includes('?') ? '&' : '?';
+    return `${rawUrl}${separator}${cleanParam}=${encodeURIComponent(cleanId)}`;
+  }
+}
+
+export async function saveAffiliateSetting(setting: AffiliateSetting): Promise<void> {
+  const settingId = 'global_admin';
+  const path = `affiliate_settings/${settingId}`;
+  const docData = {
+    affiliateId: setting.affiliateId.trim().slice(0, 100),
+    network: (setting.network || 'amazon').slice(0, 50),
+    customParam: (setting.customParam || 'ref').trim().slice(0, 50),
+    updatedAt: new Date().toISOString(),
+  };
+
+  try {
+    await setDoc(doc(db, 'affiliate_settings', settingId), docData, { merge: true });
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('feedforge_affiliate_setting', JSON.stringify({ id: settingId, ...docData }));
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export function getLocalAffiliateSetting(): AffiliateSetting {
+  if (typeof window !== 'undefined') {
+    try {
+      const raw = localStorage.getItem('feedforge_affiliate_setting');
+      if (raw) return JSON.parse(raw);
+    } catch {
+      // fallback
+    }
+  }
+  return {
+    affiliateId: '',
+    network: 'amazon',
+    customParam: 'ref',
+  };
+}
+
+export function listenToAffiliateSetting(
+  onData: (setting: AffiliateSetting | null) => void,
+  onError?: (err: Error) => void
+): Unsubscribe {
+  const path = 'affiliate_settings';
+  return onSnapshot(
+    collection(db, path),
+    (snapshot) => {
+      let found: AffiliateSetting | null = null;
+      snapshot.forEach((d) => {
+        const data = d.data();
+        found = {
+          id: d.id,
+          affiliateId: data.affiliateId || '',
+          network: data.network || 'amazon',
+          customParam: data.customParam || 'ref',
+          updatedAt: data.updatedAt,
+        };
+      });
+      if (found && typeof window !== 'undefined') {
+        localStorage.setItem('feedforge_affiliate_setting', JSON.stringify(found));
+      }
+      onData(found);
+    },
+    (error) => {
+      if (onError) onError(error);
+      handleFirestoreError(error, OperationType.LIST, path);
+    }
+  );
 }

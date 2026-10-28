@@ -168,6 +168,135 @@
         }
       },
       "required": ["title", "link", "createdAt"]
+    },
+    "AffiliateSetting": {
+      "title": "AffiliateSetting",
+      "description": "Configurazione della monetizzazione e ID affiliato dell'amministratore",
+      "type": "object",
+      "properties": {
+        "affiliateId": {
+          "type": "string",
+          "description": "ID o Tag affiliato dell'amministratore",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "network": {
+          "type": "string",
+          "description": "Piattaforma o programma di affiliazione (amazon, ebay, awin, custom)",
+          "maxLength": 50
+        },
+        "customParam": {
+          "type": "string",
+          "description": "Nome del parametro URL personalizzato (es. ref, tag, aff)",
+          "maxLength": 50
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Data di ultimo aggiornamento",
+          "maxLength": 100
+        }
+      },
+      "required": ["affiliateId"]
+    },
+    "Article": {
+      "title": "Article",
+      "description": "Articolo inserito manualmente con metadati e ottimizzazione SEO",
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "Titolo principale dell'articolo",
+          "minLength": 3,
+          "maxLength": 300
+        },
+        "slug": {
+          "type": "string",
+          "description": "Slug univoco per l'URL e la SEO",
+          "minLength": 2,
+          "maxLength": 150,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "description": {
+          "type": "string",
+          "description": "Sommario / Meta description per motori di ricerca e social",
+          "maxLength": 2000
+        },
+        "content": {
+          "type": "string",
+          "description": "Testo completo dell'articolo con formattazione",
+          "maxLength": 100000
+        },
+        "category": {
+          "type": "string",
+          "description": "Nome della categoria o sezione tematica",
+          "maxLength": 100
+        },
+        "pageId": {
+          "type": "string",
+          "description": "ID della pagina tematica di appartenenza",
+          "maxLength": 128
+        },
+        "image": {
+          "type": "string",
+          "description": "URL dell'immagine di copertina",
+          "maxLength": 2048
+        },
+        "author": {
+          "type": "string",
+          "description": "Nome dell'autore o testata",
+          "maxLength": 100
+        },
+        "link": {
+          "type": "string",
+          "description": "Link esterno, fonte originale o affiliazione",
+          "maxLength": 2048
+        },
+        "canonicalUrl": {
+          "type": "string",
+          "description": "URL canonico per prevenire contenuti duplicati",
+          "maxLength": 2048
+        },
+        "focusKeyword": {
+          "type": "string",
+          "description": "Parola chiave target principale per l'ottimizzazione SEO",
+          "maxLength": 100
+        },
+        "metaTitle": {
+          "type": "string",
+          "description": "Titolo SEO personalizzato per il tag <title> e SERP",
+          "maxLength": 200
+        },
+        "metaDescription": {
+          "type": "string",
+          "description": "Meta description specifica per i motori di ricerca",
+          "maxLength": 320
+        },
+        "schemaType": {
+          "type": "string",
+          "description": "Tipo di Schema.org JSON-LD (NewsArticle, BlogPosting, Product)",
+          "maxLength": 50
+        },
+        "price": {
+          "type": "string",
+          "description": "Prezzo o offerta indicata nell'articolo se applicabile",
+          "maxLength": 50
+        },
+        "isManual": {
+          "type": "boolean",
+          "description": "Flag che identifica l'articolo come inserito manualmente"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Data e ora di pubblicazione ISO",
+          "maxLength": 100
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Data e ora dell'ultima modifica ISO",
+          "maxLength": 100
+        }
+      },
+      "required": ["title", "slug", "pageId", "createdAt"]
     }
   },
   "firestore": {
@@ -179,6 +308,10 @@
       "schema": "Page",
       "description": "Raccolta delle pagine tematiche create dall'utente"
     },
+    "/articles/{articleId}": {
+      "schema": "Article",
+      "description": "Articoli manuali pubblicati nelle categorie con ottimizzazione SEO"
+    },
     "/subscriptions/{subscriptionId}": {
       "schema": "Subscription",
       "description": "Iscrizioni dei visitatori alle notifiche in tempo reale"
@@ -186,6 +319,10 @@
     "/notifications/{notificationId}": {
       "schema": "Notification",
       "description": "Notifiche broadcast in tempo reale per nuovi articoli"
+    },
+    "/affiliate_settings/{settingId}": {
+      "schema": "AffiliateSetting",
+      "description": "Impostazioni persistenti per la monetizzazione e scraping affiliati dell'amministratore"
     }
   }
 }

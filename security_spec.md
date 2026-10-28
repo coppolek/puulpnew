@@ -1,4 +1,4 @@
-# Security Spec & Data Invariants for FeedForge
+# Security Spec & Data Invariants for FeedForge / puulp.it
 
 ## 1. Data Invariants
 - Feeds must have a valid `url` (valid string <= 2048 chars, >= 5 chars).
@@ -8,7 +8,8 @@
 - `xml` field must be a valid string <= 500000 chars.
 - Subscriptions must have a valid `email` (>= 5 chars, <= 256 chars) and a `pages` list (<= 100 entries).
 - Notifications must have `title` (<= 300 chars), `link` (<= 2048 chars), and `createdAt` (<= 100 chars).
-- No unauthorized field additions (strict key enforcement).
+- Affiliate settings must have a valid `affiliateId` (>= 1 char, <= 100 chars), valid optional `network` (<= 50 chars), and `customParam` (<= 50 chars).
+- No unauthorized field additions (strict key enforcement via `hasOnly`).
 
 ## 2. The Dirty Dozen Payloads
 1. **Oversized URL Injection**: `{ url: "a".repeat(3000), title: "Test", interval: 60, xml: "<rss/>" }` -> REJECT (maxLength: 2048)
@@ -23,3 +24,5 @@
 10. **Arbitrary Object as Title**: `{ url: "https://example.com", title: { evil: true }, interval: 60, xml: "<rss/>" }` -> REJECT (title must be string)
 11. **Malicious Protocol Injection**: Empty or corrupted URL -> REJECT (min size 5)
 12. **Catch-All Wildcard Exploit**: Accessing an undeclared collection `/internal_secrets/admin` -> REJECT (default-deny catch-all)
+13. **Oversized Affiliate Tag Attack**: `{ affiliateId: "a".repeat(200) }` -> REJECT (affiliateId size > 100)
+14. **Affiliate Ghost Field Exploit**: `{ affiliateId: "puulp-21", maliciousKey: "exploit" }` -> REJECT (hasOnly check)

@@ -31,10 +31,22 @@ import {
   CustomPage,
   VisitorSubscription,
   LiveNotification,
+  ManualArticle,
+  saveManualArticle,
+  deleteManualArticle,
+  listenToManualArticles,
 } from './lib/firebase.ts';
 import { AdSenseBanner } from './components/AdSenseBanner.tsx';
 import { NotificationAdCard } from './components/NotificationAdCard.tsx';
 import { ShareModal, ShareData } from './components/ShareModal.tsx';
+import { AffiliateCategoryScraperModal } from './components/AffiliateCategoryScraperModal.tsx';
+import { ManualArticleModal } from './components/ManualArticleModal.tsx';
+import { ArticleDetailModal } from './components/ArticleDetailModal.tsx';
+
+const isAffiliateLink = (link: string): boolean => {
+  if (!link) return false;
+  return /tag=|campid=|awinaffid=|aff=|ref=|partner=|affiliate/i.test(link);
+};
 
 interface FeedItem {
   title: string;
@@ -42,6 +54,9 @@ interface FeedItem {
   date?: string;
   description?: string;
   image?: string;
+  price?: string;
+  isManual?: boolean;
+  rawArticle?: ManualArticle;
 }
 
 interface ScrapedFeed {
@@ -174,6 +189,17 @@ export default function App() {
   const [copiedFeedId, setCopiedFeedId] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [pageCopiedRss, setPageCopiedRss] = useState(false);
+  const [pageCopiedLink, setPageCopiedLink] = useState(false);
+  const [copiedDropdownId, setCopiedDropdownId] = useState<string | null>(null);
+
+  // Affiliate & Category Scraper Modal State
+  const [showAffiliateModal, setShowAffiliateModal] = useState<boolean>(false);
+
+  // Manual Editorial Articles & SEO state
+  const [manualArticles, setManualArticles] = useState<ManualArticle[]>([]);
+  const [showManualArticleModal, setShowManualArticleModal] = useState<boolean>(false);
+  const [articleToEdit, setArticleToEdit] = useState<ManualArticle | null>(null);
+  const [readingArticle, setReadingArticle] = useState<ManualArticle | null>(null);
 
   // Listen to Firestore database, Auth state, and Notifications on boot
   useEffect(() => {
@@ -255,7 +281,7 @@ export default function App() {
       (err) => console.error('Feeds snapshot error:', err)
     );
 
-    // Listen to Pages
+    // Listen to Pages with deep link support
     const unsubscribePages = listenToCustomPages(
       (customPages) => {
         setPages(customPages);
@@ -263,6 +289,17 @@ export default function App() {
           seedStarterPages();
         } else {
           setActivePageId((current) => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const targetP = urlParams.get('p') || urlParams.get('page');
+            const targetCat = urlParams.get('cat') || urlParams.get('categoria');
+            if (targetP) {
+              const matched = customPages.find((p) => p.slug === targetP || p.id === targetP);
+              if (matched) return matched.id;
+            }
+            if (targetCat) {
+              const matched = customPages.find((p) => p.category?.toLowerCase() === targetCat.toLowerCase());
+              if (matched) return matched.id;
+            }
             if (!current || !customPages.some((p) => p.id === current)) {
               return customPages[0].id;
             }
@@ -273,11 +310,28 @@ export default function App() {
       (err) => console.error('Pages snapshot error:', err)
     );
 
+    // Listen to manual articles with SEO
+    const unsubscribeArticles = listenToManualArticles(
+      (articles) => {
+        setManualArticles(articles);
+        const urlParams = new URLSearchParams(window.location.search);
+        const targetArt = urlParams.get('art') || urlParams.get('article');
+        if (targetArt) {
+          const matchedArt = articles.find((a) => a.slug === targetArt || a.id === targetArt);
+          if (matchedArt) {
+            setReadingArticle(matchedArt);
+          }
+        }
+      },
+      (err) => console.error('Articles snapshot error:', err)
+    );
+
     return () => {
       unsubscribeAuth();
       unsubscribeNotifs();
       unsubscribeFeeds();
       unsubscribePages();
+      unsubscribeArticles();
     };
   }, []);
 
@@ -378,21 +432,67 @@ export default function App() {
       if (ogTitle) ogTitle.setAttribute('content', `${activePage.title} — puulp.it`);
       const twTitle = document.querySelector('meta[name="twitter:title"]');
       if (twTitle) twTitle.setAttribute('content', `${activePage.title} — puulp.it`);
+
+      // Sync URL query parameter so every category & page has its own direct shareable link
+      try {
+        const slug = activePage.slug || activePage.id;
+        const currentUrl = new URL(window.location.href);
+        if (currentUrl.searchParams.get('p') !== slug) {
+          currentUrl.searchParams.set('p', slug);
+          window.history.replaceState({}, '', currentUrl.toString());
+        }
+      } catch {}
     } else {
       document.title = 'puulp.it — Rassegna Stampa, Pagine Tematiche e Feed RSS';
     }
   }, [activePage]);
+
+  function handleCopyPageLink() {
+    if (!activePage) return;
+    const directUrl = `${window.location.origin}/?p=${encodeURIComponent(activePage.slug || activePage.id)}`;
+    navigator.clipboard.writeText(directUrl);
+    setPageCopiedLink(true);
+    setTimeout(() => setPageCopiedLink(false), 2000);
+  }
 
   function handleOpenShare(data: ShareData) {
     setShareModalData(data);
     setIsShareModalOpen(true);
   }
 
-  // All articles across current scope
+  // All articles across current scope (both manual editorial articles & feed items)
   const scopedArticles = useMemo(() => {
     const list: Array<FeedItem & { feedTitle: string; feedId: string }> = [];
     const seenLinks = new Set<string>();
 
+    // 1. Manual Editorial Articles in this scope
+    const targetManualArticles =
+      searchScope === 'all'
+        ? manualArticles
+        : manualArticles.filter((a) => a.pageId === activePage?.id);
+
+    for (const a of targetManualArticles) {
+      const artUrl =
+        a.link ||
+        `${window.location.origin}/?p=${encodeURIComponent(a.pageId)}&art=${encodeURIComponent(a.slug)}`;
+      if (!seenLinks.has(artUrl)) {
+        seenLinks.add(artUrl);
+        list.push({
+          title: a.title,
+          link: artUrl,
+          date: new Date(a.createdAt).toLocaleDateString('it-IT'),
+          description: a.description,
+          image: a.image,
+          price: a.price,
+          isManual: true,
+          rawArticle: a,
+          feedTitle: `✍️ ${a.category || activePage?.category || 'Editoriale'}`,
+          feedId: `manual_${a.id}`,
+        });
+      }
+    }
+
+    // 2. Automated Feed Articles
     const targetFeeds = searchScope === 'all' ? savedFeeds : pageFeeds;
 
     for (const f of targetFeeds) {
@@ -409,6 +509,8 @@ export default function App() {
     }
 
     list.sort((a, b) => {
+      // If both published on same date and one is manual, show manual editorial first
+      if (a.isManual && !b.isManual && a.date === b.date) return -1;
       if (!a.date || !b.date) return 0;
       const timeA = new Date(a.date).getTime();
       const timeB = new Date(b.date).getTime();
@@ -417,7 +519,21 @@ export default function App() {
     });
 
     return list;
-  }, [searchScope, pageFeeds, savedFeeds]);
+  }, [searchScope, pageFeeds, savedFeeds, manualArticles, activePage]);
+
+  async function handleSaveManualArticle(
+    data: Omit<ManualArticle, 'id' | 'createdAt'> & { id?: string; createdAt?: string }
+  ) {
+    await saveManualArticle(data);
+    setDbSaveNotice('Articolo salvato e pubblicato nella categoria con ottimizzazione SEO!');
+    setTimeout(() => setDbSaveNotice(null), 3500);
+  }
+
+  async function handleDeleteManualArticle(articleId: string) {
+    await deleteManualArticle(articleId);
+    setDbSaveNotice('Articolo eliminato.');
+    setTimeout(() => setDbSaveNotice(null), 2500);
+  }
 
   // Filtered articles based on search query ("Cerca") and source chip
   const displayedArticles = useMemo(() => {
@@ -982,23 +1098,26 @@ export default function App() {
                         (f) => (p.feedIds && p.feedIds.includes(f.id)) || f.pageId === p.id
                       ).length;
                       const isActive = activePage?.id === p.id;
+                      const pageUrl = `${window.location.origin}/?p=${encodeURIComponent(p.slug || p.id)}`;
                       return (
-                        <button
+                        <div
                           key={p.id}
-                          type="button"
-                          onClick={() => {
-                            setActivePageId(p.id);
-                            setSelectedSourceFilter(null);
-                            setSearchQuery('');
-                            setPageDropdownOpen(false);
-                          }}
-                          className={`w-full text-left p-3 flex items-start justify-between gap-2.5 transition-colors cursor-pointer ${
+                          className={`w-full p-2.5 sm:p-3 flex items-start justify-between gap-2.5 transition-colors border-b border-border/30 last:border-b-0 ${
                             isActive
                               ? 'bg-foreground text-background font-bold'
                               : 'hover:bg-muted/60 text-foreground'
                           }`}
                         >
-                          <div className="min-w-0 flex-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setActivePageId(p.id);
+                              setSelectedSourceFilter(null);
+                              setSearchQuery('');
+                              setPageDropdownOpen(false);
+                            }}
+                            className="min-w-0 flex-1 text-left cursor-pointer"
+                          >
                             <div className="flex items-center gap-1.5">
                               <span className="font-bold truncate text-sm" style={fontFraunces}>
                                 {p.title}
@@ -1016,33 +1135,55 @@ export default function App() {
                                 {p.description}
                               </p>
                             )}
-                          </div>
+                          </button>
 
-                          <div className="flex flex-col items-end shrink-0 gap-1">
-                            {p.category && (
-                              <span
-                                className={`text-[9px] uppercase tracking-wider px-1.5 py-0.2 border ${
-                                  isActive
-                                    ? 'border-background/40 bg-background/20 text-background'
-                                    : 'border-border/60 bg-muted text-muted-foreground'
-                                }`}
-                              >
-                                {p.category}
-                              </span>
-                            )}
-                            {count > 0 && (
-                              <span
-                                className={`text-[10px] px-1.5 py-0.2 rounded-full font-semibold ${
-                                  isActive
-                                    ? 'bg-primary text-primary-foreground'
-                                    : 'bg-muted/80 text-muted-foreground'
-                                }`}
-                              >
-                                {count} {count === 1 ? 'feed' : 'feed'}
-                              </span>
-                            )}
+                          <div className="flex flex-col items-end shrink-0 gap-1.5">
+                            <div className="flex items-center gap-1">
+                              {p.category && (
+                                <span
+                                  className={`text-[9px] uppercase tracking-wider px-1.5 py-0.2 border ${
+                                    isActive
+                                      ? 'border-background/40 bg-background/20 text-background'
+                                      : 'border-border/60 bg-muted text-muted-foreground'
+                                  }`}
+                                >
+                                  {p.category}
+                                </span>
+                              )}
+                              {count > 0 && (
+                                <span
+                                  className={`text-[10px] px-1.5 py-0.2 rounded-full font-semibold ${
+                                    isActive
+                                      ? 'bg-primary text-primary-foreground'
+                                      : 'bg-muted/80 text-muted-foreground'
+                                  }`}
+                                >
+                                  {count} {count === 1 ? 'feed' : 'feed'}
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Direct category permalink button */}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigator.clipboard.writeText(pageUrl);
+                                setCopiedDropdownId(p.id);
+                                setTimeout(() => setCopiedDropdownId(null), 1500);
+                              }}
+                              className={`px-1.5 py-0.5 text-[10px] border transition-colors cursor-pointer flex items-center gap-1 ${
+                                isActive
+                                  ? 'border-background/60 bg-background/10 hover:bg-background/25 text-background'
+                                  : 'border-border bg-card hover:bg-accent text-foreground'
+                              }`}
+                              title={`Copia link diretto per la categoria: ${p.title}`}
+                            >
+                              <span>{copiedDropdownId === p.id ? '✓' : '🔗'}</span>
+                              <span>{copiedDropdownId === p.id ? 'Copiato!' : 'Link'}</span>
+                            </button>
                           </div>
-                        </button>
+                        </div>
                       );
                     })
                   )}
@@ -1084,6 +1225,28 @@ export default function App() {
             {/* Admin Login / Status Trigger */}
             {isAdmin ? (
               <div className="flex items-center gap-1.5 sm:gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setArticleToEdit(null);
+                    setShowManualArticleModal(true);
+                  }}
+                  className="border-2 border-border bg-primary text-primary-foreground hover:opacity-90 px-2 sm:px-2.5 py-1.5 min-h-[38px] text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer flex items-center gap-1 shadow-[2px_2px_0_0_var(--foreground)] active:translate-x-0.5 active:translate-y-0.5"
+                  title="Inserisci manualmente un articolo in una categoria con ottimizzazione SEO"
+                >
+                  <span>✍️</span>
+                  <span className="hidden sm:inline">+ Nuovo Articolo</span>
+                  <span className="sm:hidden">+ Articolo</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowAffiliateModal(true)}
+                  className="border-2 border-amber-500 bg-amber-50 hover:bg-amber-100 text-amber-900 px-2 sm:px-2.5 py-1.5 min-h-[38px] text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer flex items-center gap-1 shadow-[2px_2px_0_0_#d97706]"
+                  title="Scraping di intere categorie e relative sottocategorie con link affiliato per monetizzare"
+                >
+                  <span className="text-amber-600 font-bold">💰</span>
+                  <span className="hidden sm:inline">Monetizza Categorie</span>
+                </button>
                 <button
                   type="button"
                   onClick={() => setAdminMode(!adminMode)}
@@ -1130,10 +1293,19 @@ export default function App() {
                 Pannello Redazione Attivo ({currentUser?.email || 'Admin Connesso'})
               </span>
               <span className="text-muted-foreground hidden sm:inline">
-                — Puoi aggiungere feed, creare pagine e lanciare scansioni.
+                — Puoi aggiungere feed, creare pagine, estrarre categorie e lanciare scansioni.
               </span>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+              <button
+                type="button"
+                onClick={() => setShowAffiliateModal(true)}
+                className="border border-amber-600 bg-amber-500 hover:bg-amber-600 text-white px-3 py-1 text-xs font-bold uppercase shadow-[2px_2px_0_0_var(--foreground)] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none cursor-pointer flex items-center gap-1.5"
+                title="Estrai intere categorie e relative sottocategorie con link affiliato per monetizzare"
+              >
+                <span>💰</span>
+                <span>Scraping Categorie & Affiliati</span>
+              </button>
               <button
                 type="button"
                 onClick={() => setShowNewPageModal(true)}
@@ -1183,8 +1355,31 @@ export default function App() {
                 {activePage.title}
               </h1>
 
-              {/* Quick Actions (Condividi Pagina + Notifiche + RSS) */}
+              {/* Quick Actions (Copia Link Categoria + Scrivi Articolo + Condividi + Notifiche + RSS) */}
               <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                <button
+                  type="button"
+                  onClick={handleCopyPageLink}
+                  className="border-2 border-border bg-card px-2.5 sm:px-3 py-1.5 min-h-[38px] text-xs uppercase font-medium hover:bg-accent transition-colors cursor-pointer flex items-center gap-1.5 shadow-[2px_2px_0_0_var(--foreground)] active:translate-x-0.5 active:translate-y-0.5"
+                  title="Copia link diretto di questa categoria / pagina"
+                >
+                  <span className="text-primary font-bold">{pageCopiedLink ? '✓' : '🔗'}</span>
+                  <span>{pageCopiedLink ? 'Link Copiato!' : 'Copia Link Categoria'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setArticleToEdit(null);
+                    setShowManualArticleModal(true);
+                  }}
+                  className="border-2 border-border bg-card hover:bg-primary hover:text-primary-foreground px-2.5 sm:px-3 py-1.5 min-h-[38px] text-xs uppercase font-medium transition-colors cursor-pointer flex items-center gap-1.5 shadow-[2px_2px_0_0_var(--foreground)] active:translate-x-0.5 active:translate-y-0.5"
+                  title="Inserisci manualmente un articolo in questa categoria con ottimizzazione SEO"
+                >
+                  <span className="text-primary font-bold">✍️</span>
+                  <span>+ Scrivi Articolo</span>
+                </button>
+
                 <button
                   type="button"
                   onClick={() =>
@@ -1198,7 +1393,7 @@ export default function App() {
                   className="border-2 border-border bg-card px-2.5 sm:px-3 py-1.5 min-h-[38px] text-xs uppercase font-medium hover:bg-accent transition-colors cursor-pointer flex items-center gap-1.5 shadow-[2px_2px_0_0_var(--foreground)] active:translate-x-0.5 active:translate-y-0.5"
                   title="Condividi questa pagina sui social"
                 >
-                  <span className="text-primary font-bold">🔗</span>
+                  <span className="text-primary font-bold">📤</span>
                   <span>Condividi</span>
                 </button>
 
@@ -1434,8 +1629,13 @@ export default function App() {
                         >
                           {String(idx + 1).padStart(2, '0')}
                         </span>
-                        <span className="font-bold text-foreground uppercase tracking-wider text-[11px] truncate">
+                        <span className="font-bold text-foreground uppercase tracking-wider text-[11px] truncate flex items-center gap-1.5">
                           {item.feedTitle}
+                          {item.isManual && (
+                            <span className="bg-primary/10 text-primary border border-primary/30 text-[9px] uppercase font-bold px-1.5 py-0.2 rounded select-none">
+                              SEO Ottimizzato
+                            </span>
+                          )}
                         </span>
                         {item.date && (
                           <>
@@ -1473,35 +1673,75 @@ export default function App() {
                     <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 items-start">
                       {/* Article Image (if available) */}
                       {item.image && (
-                        <a
-                          href={item.link}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="w-full sm:w-36 sm:h-24 shrink-0 block overflow-hidden border-2 border-border bg-muted group"
-                        >
-                          <img
-                            src={item.image}
-                            alt=""
-                            loading="lazy"
-                            onError={(e) => {
-                              e.currentTarget.parentElement!.style.display = 'none';
-                            }}
-                            className="w-full h-44 sm:h-24 object-cover group-hover:scale-105 transition-transform duration-300"
-                          />
-                        </a>
+                        item.isManual && item.rawArticle ? (
+                          <div
+                            onClick={() => setReadingArticle(item.rawArticle!)}
+                            className="w-full sm:w-36 sm:h-24 shrink-0 block overflow-hidden border-2 border-border bg-muted group cursor-pointer"
+                          >
+                            <img
+                              src={item.image}
+                              alt={item.title}
+                              loading="lazy"
+                              onError={(e) => {
+                                const target = e.currentTarget;
+                                if (!target.dataset.triedFallback) {
+                                  target.dataset.triedFallback = 'true';
+                                  target.src = 'https://images.unsplash.com/photo-1526738549149-8e07eca6c147?w=400&auto=format&fit=crop&q=80';
+                                } else if (target.parentElement) {
+                                  target.parentElement.style.display = 'none';
+                                }
+                              }}
+                              className="w-full h-44 sm:h-24 object-cover group-hover:scale-105 transition-transform duration-300"
+                            />
+                          </div>
+                        ) : (
+                          <a
+                            href={item.link}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="w-full sm:w-36 sm:h-24 shrink-0 block overflow-hidden border-2 border-border bg-muted group"
+                          >
+                            <img
+                              src={item.image}
+                              alt=""
+                              loading="lazy"
+                              onError={(e) => {
+                                const target = e.currentTarget;
+                                if (!target.dataset.triedFallback) {
+                                  target.dataset.triedFallback = 'true';
+                                  target.src = 'https://images.unsplash.com/photo-1526738549149-8e07eca6c147?w=400&auto=format&fit=crop&q=80';
+                                } else if (target.parentElement) {
+                                  target.parentElement.style.display = 'none';
+                                }
+                              }}
+                              className="w-full h-44 sm:h-24 object-cover group-hover:scale-105 transition-transform duration-300"
+                            />
+                          </a>
+                        )
                       )}
 
                       {/* Content */}
                       <div className="min-w-0 flex-1 w-full">
-                        <a
-                          href={item.link}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-lg sm:text-xl font-extrabold hover:text-primary transition-colors leading-snug block"
-                          style={fontFraunces}
-                        >
-                          {item.title}
-                        </a>
+                        {item.isManual && item.rawArticle ? (
+                          <button
+                            type="button"
+                            onClick={() => setReadingArticle(item.rawArticle!)}
+                            className="text-left text-lg sm:text-xl font-extrabold hover:text-primary transition-colors leading-snug block cursor-pointer"
+                            style={fontFraunces}
+                          >
+                            {item.title}
+                          </button>
+                        ) : (
+                          <a
+                            href={item.link}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-lg sm:text-xl font-extrabold hover:text-primary transition-colors leading-snug block"
+                            style={fontFraunces}
+                          >
+                            {item.title}
+                          </a>
+                        )}
 
                         {item.description && (
                           <p className="mt-1.5 text-xs text-muted-foreground line-clamp-3 leading-relaxed">
@@ -1511,16 +1751,43 @@ export default function App() {
 
                         {/* Footer Affordances on Article */}
                         <div className="mt-2.5 flex items-center justify-between gap-3 text-[11px] font-mono">
-                          <div className="flex items-center gap-3">
-                            <a
-                              href={item.link}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="font-bold underline text-foreground hover:text-primary transition-colors flex items-center gap-1 py-1"
-                            >
-                              <span>Apri notizia</span>
-                              <span>↗</span>
-                            </a>
+                          <div className="flex items-center gap-2.5 flex-wrap">
+                            {item.isManual && item.rawArticle ? (
+                              <button
+                                type="button"
+                                onClick={() => setReadingArticle(item.rawArticle!)}
+                                className="font-bold underline text-primary hover:text-foreground transition-colors flex items-center gap-1 py-1 cursor-pointer"
+                              >
+                                <span>📖 Leggi Articolo</span>
+                              </button>
+                            ) : (
+                              <a
+                                href={item.link}
+                                target="_blank"
+                                rel="noreferrer"
+                                className={`font-bold underline transition-colors flex items-center gap-1 py-1 ${
+                                  isAffiliateLink(item.link)
+                                    ? 'text-amber-800 hover:text-amber-950 font-extrabold'
+                                    : 'text-foreground hover:text-primary'
+                                }`}
+                              >
+                                <span>{isAffiliateLink(item.link) ? 'Vedi Offerta Partner' : 'Apri notizia'}</span>
+                                <span>↗</span>
+                              </a>
+                            )}
+
+                            {isAffiliateLink(item.link) && (
+                              <span className="text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300 px-1.5 py-0.2 rounded">
+                                Partner Link
+                              </span>
+                            )}
+
+                            {item.price && (
+                              <span className="text-[10px] font-bold bg-amber-50 text-amber-900 border border-amber-200 px-1.5 py-0.2 rounded">
+                                {item.price}
+                              </span>
+                            )}
+
                             <button
                               type="button"
                               onClick={() => {
@@ -1532,6 +1799,35 @@ export default function App() {
                             >
                               {copiedFeedId === item.link ? '✓ Copiato!' : 'Copia link'}
                             </button>
+
+                            {/* In admin mode: edit/delete actions for manual articles */}
+                            {isAdmin && adminMode && item.isManual && item.rawArticle && (
+                              <div className="flex items-center gap-2 border-l border-border pl-2">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setArticleToEdit(item.rawArticle!);
+                                    setShowManualArticleModal(true);
+                                  }}
+                                  className="text-xs text-muted-foreground hover:text-foreground cursor-pointer font-bold"
+                                  title="Modifica articolo manuale"
+                                >
+                                  ✎ Modifica
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (confirm('Sei sicuro di voler eliminare questo articolo manuale?')) {
+                                      handleDeleteManualArticle(item.rawArticle!.id);
+                                    }
+                                  }}
+                                  className="text-xs text-destructive hover:underline cursor-pointer font-bold"
+                                  title="Elimina articolo manuale"
+                                >
+                                  ✕ Elimina
+                                </button>
+                              </div>
+                            )}
                           </div>
 
                           {item.date && (
@@ -1586,6 +1882,29 @@ export default function App() {
               <span className="text-xs uppercase font-bold text-primary">
                 {savedFeeds.length} Feed nel DB
               </span>
+            </div>
+
+            {/* Promo Card: Scraping Categorie & Affiliati */}
+            <div className="mb-6 p-4 sm:p-5 rounded-xl border-2 border-amber-500 bg-amber-50/60 shadow-[4px_4px_0_0_#d97706] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xl">💰</span>
+                  <h4 className="font-extrabold text-sm sm:text-base text-amber-950 uppercase tracking-wide">
+                    Scraping Intere Categorie & Link Affiliato
+                  </h4>
+                </div>
+                <p className="text-xs text-amber-900 mt-1 max-w-xl">
+                  Inserisci il tuo ID affiliato (Amazon, eBay, Awin, ecc.) e l'URL di una categoria: il crawler scopre automaticamente le sottocategorie e genera annunci monetizzati al 100%.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAffiliateModal(true)}
+                className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs uppercase tracking-wider shadow-sm flex items-center gap-2 shrink-0 cursor-pointer transition-colors"
+              >
+                <span>Apri Scanner Affiliazioni</span>
+                <span>→</span>
+              </button>
             </div>
 
             <form
@@ -2353,6 +2672,48 @@ export default function App() {
         isOpen={isShareModalOpen}
         onClose={() => setIsShareModalOpen(false)}
         data={shareModalData}
+      />
+
+      {/* MODAL: AFFILIATE CATEGORY SCRAPER & MONETIZATION */}
+      <AffiliateCategoryScraperModal
+        isOpen={showAffiliateModal}
+        onClose={() => setShowAffiliateModal(false)}
+        pages={pages}
+        onPageCreated={(newPageId) => {
+          setActivePageId(newPageId);
+        }}
+        onFeedsAdded={() => {
+          // Feeds are reactively loaded via Firestore snapshot listener
+        }}
+      />
+
+      {/* MODAL: MANUAL ARTICLE CREATION & EDITING WITH SEO OPTIMIZATION */}
+      <ManualArticleModal
+        isOpen={showManualArticleModal}
+        onClose={() => {
+          setShowManualArticleModal(false);
+          setArticleToEdit(null);
+        }}
+        pages={pages}
+        initialPageId={activePage?.id}
+        articleToEdit={articleToEdit}
+        onSave={handleSaveManualArticle}
+      />
+
+      {/* MODAL: ARTICLE DETAIL & IN-APP EDITORIAL READER */}
+      <ArticleDetailModal
+        article={readingArticle}
+        isOpen={Boolean(readingArticle)}
+        onClose={() => setReadingArticle(null)}
+        isAdmin={isAdmin}
+        adminMode={adminMode}
+        onEdit={(art) => {
+          setReadingArticle(null);
+          setArticleToEdit(art);
+          setShowManualArticleModal(true);
+        }}
+        onDelete={handleDeleteManualArticle}
+        onShare={handleOpenShare}
       />
     </main>
   );
