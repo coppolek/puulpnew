@@ -1920,6 +1920,90 @@ async function startServer() {
     }
   });
 
+  // API Route: Extract full article content for in-app popup reader
+  app.get('/api/article-content', async (req: Request, res: Response) => {
+    try {
+      const targetUrl = req.query.url as string;
+      if (!targetUrl || typeof targetUrl !== 'string') {
+        res.status(400).json({ error: 'URL mancante.' });
+        return;
+      }
+
+      const normalized = normalizeUrl(targetUrl);
+      const { text } = await fetchPageWithFallbacks(normalized);
+      const $ = cheerio.load(text);
+
+      // Remove clutter
+      $('script, style, noscript, nav, header, footer, aside, .advertisement, .ad, .social-share, .comments, [role="navigation"], [role="banner"]').remove();
+
+      const title =
+        $('meta[property="og:title"]').attr('content')?.trim() ||
+        $('h1').first().text().trim() ||
+        $('title').first().text().trim() ||
+        '';
+
+      const rawImage =
+        $('meta[property="og:image"]').attr('content') ||
+        $('meta[name="twitter:image"]').attr('content') ||
+        $('article img, main img, .content img').first().attr('src');
+      const image = rawImage ? sanitizeAndResolveImageUrl(rawImage, normalized) : undefined;
+
+      const author =
+        $('meta[name="author"]').attr('content')?.trim() ||
+        $('meta[property="article:author"]').attr('content')?.trim() ||
+        $('[rel="author"], .author, .byline, [class*="author"]').first().text().trim() ||
+        undefined;
+
+      const date =
+        $('meta[property="article:published_time"]').attr('content')?.trim() ||
+        $('time').first().attr('datetime')?.trim() ||
+        $('time').first().text().trim() ||
+        undefined;
+
+      // Extract article paragraphs and code blocks
+      const paragraphs: string[] = [];
+      const selector = 'article p, main p, [class*="article-body"] p, [class*="story-body"] p, [class*="entry-content"] p, .content p, [class*="post-content"] p';
+      
+      $(selector).each((_, el) => {
+        const pText = $(el).text().trim();
+        const lower = pText.toLowerCase();
+        if (
+          pText.length > 25 &&
+          !lower.includes('cookie') &&
+          !lower.includes('tutti i diritti riservati') &&
+          !lower.includes('informativa sulla privacy') &&
+          !lower.includes('abbonati a') &&
+          !lower.includes('leggi anche:')
+        ) {
+          paragraphs.push(pText);
+        }
+      });
+
+      // Extract code blocks if any exist on technical blogs
+      $('pre code, pre').each((_, el) => {
+        const codeText = $(el).text().trim();
+        if (codeText.length > 10 && codeText.length < 5000) {
+          paragraphs.push(`\`\`\`\n${codeText}\n\`\`\``);
+        }
+      });
+
+      const content = paragraphs.join('\n\n');
+
+      res.json({
+        title,
+        image,
+        author,
+        date,
+        content,
+        paragraphsCount: paragraphs.length,
+      });
+    } catch (err: unknown) {
+      console.error('Article content extraction error:', err);
+      const message = err instanceof Error ? err.message : 'Impossibile estrarre il testo completo.';
+      res.status(500).json({ error: message });
+    }
+  });
+
   // API Route: Scrape entire Categories and Subcategories with Affiliate Monetization
   app.post('/api/scrape-categories', async (req: Request, res: Response) => {
     try {

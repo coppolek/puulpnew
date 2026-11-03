@@ -41,7 +41,7 @@ import { NotificationAdCard } from './components/NotificationAdCard.tsx';
 import { ShareModal, ShareData } from './components/ShareModal.tsx';
 import { AffiliateCategoryScraperModal } from './components/AffiliateCategoryScraperModal.tsx';
 import { ManualArticleModal } from './components/ManualArticleModal.tsx';
-import { ArticleDetailModal } from './components/ArticleDetailModal.tsx';
+import { ArticleDetailModal, ArticleDetailItem } from './components/ArticleDetailModal.tsx';
 
 const isAffiliateLink = (link: string): boolean => {
   if (!link) return false;
@@ -199,7 +199,7 @@ export default function App() {
   const [manualArticles, setManualArticles] = useState<ManualArticle[]>([]);
   const [showManualArticleModal, setShowManualArticleModal] = useState<boolean>(false);
   const [articleToEdit, setArticleToEdit] = useState<ManualArticle | null>(null);
-  const [readingArticle, setReadingArticle] = useState<ManualArticle | null>(null);
+  const [readingArticle, setReadingArticle] = useState<ArticleDetailItem | null>(null);
 
   // Listen to Firestore database, Auth state, and Notifications on boot
   useEffect(() => {
@@ -533,6 +533,27 @@ export default function App() {
     await deleteManualArticle(articleId);
     setDbSaveNotice('Articolo eliminato.');
     setTimeout(() => setDbSaveNotice(null), 2500);
+  }
+
+  // Open ANY article (feed or manual) in in-app popup reader
+  function handleOpenArticle(item: FeedItem & { feedTitle?: string }) {
+    if (item.rawArticle) {
+      setReadingArticle(item.rawArticle);
+      return;
+    }
+
+    setReadingArticle({
+      title: item.title,
+      link: item.link,
+      image: item.image,
+      description: item.description,
+      date: item.date,
+      createdAt: item.date || new Date().toISOString(),
+      feedTitle: item.feedTitle || activePage?.title,
+      category: activePage?.category || activePage?.title || 'Articolo',
+      price: item.price,
+      isManual: false,
+    });
   }
 
   // Filtered articles based on search query ("Cerca") and source chip
@@ -964,15 +985,22 @@ export default function App() {
           </p>
           <div className="mt-2 flex items-center justify-between text-xs">
             <span className="text-muted-foreground">{activeToast.feedTitle}</span>
-            <a
-              href={activeToast.link}
-              target="_blank"
-              rel="noreferrer"
-              onClick={() => setActiveToast(null)}
-              className="font-bold underline text-foreground hover:text-primary"
+            <button
+              type="button"
+              onClick={() => {
+                handleOpenArticle({
+                  title: activeToast.title,
+                  link: activeToast.link,
+                  description: activeToast.message,
+                  feedTitle: activeToast.feedTitle,
+                  date: new Date().toLocaleDateString('it-IT'),
+                });
+                setActiveToast(null);
+              }}
+              className="font-bold underline text-foreground hover:text-primary cursor-pointer"
             >
-              Leggi ora →
-            </a>
+              Leggi in popup →
+            </button>
           </div>
         </div>
       )}
@@ -1673,78 +1701,47 @@ export default function App() {
                     <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 items-start">
                       {/* Article Image (if available) */}
                       {item.image && (
-                        item.isManual && item.rawArticle ? (
-                          <div
-                            onClick={() => setReadingArticle(item.rawArticle!)}
-                            className="w-full sm:w-36 sm:h-24 shrink-0 block overflow-hidden border-2 border-border bg-muted group cursor-pointer"
-                          >
-                            <img
-                              src={item.image}
-                              alt={item.title}
-                              loading="lazy"
-                              onError={(e) => {
-                                const target = e.currentTarget;
-                                if (!target.dataset.triedFallback) {
-                                  target.dataset.triedFallback = 'true';
-                                  target.src = 'https://images.unsplash.com/photo-1526738549149-8e07eca6c147?w=400&auto=format&fit=crop&q=80';
-                                } else if (target.parentElement) {
-                                  target.parentElement.style.display = 'none';
-                                }
-                              }}
-                              className="w-full h-44 sm:h-24 object-cover group-hover:scale-105 transition-transform duration-300"
-                            />
-                          </div>
-                        ) : (
-                          <a
-                            href={item.link}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="w-full sm:w-36 sm:h-24 shrink-0 block overflow-hidden border-2 border-border bg-muted group"
-                          >
-                            <img
-                              src={item.image}
-                              alt=""
-                              loading="lazy"
-                              onError={(e) => {
-                                const target = e.currentTarget;
-                                if (!target.dataset.triedFallback) {
-                                  target.dataset.triedFallback = 'true';
-                                  target.src = 'https://images.unsplash.com/photo-1526738549149-8e07eca6c147?w=400&auto=format&fit=crop&q=80';
-                                } else if (target.parentElement) {
-                                  target.parentElement.style.display = 'none';
-                                }
-                              }}
-                              className="w-full h-44 sm:h-24 object-cover group-hover:scale-105 transition-transform duration-300"
-                            />
-                          </a>
-                        )
+                        <div
+                          onClick={() => handleOpenArticle(item)}
+                          className="w-full sm:w-36 sm:h-24 shrink-0 block overflow-hidden border-2 border-border bg-muted group cursor-pointer"
+                          title="Clicca per aprire l'articolo in popup"
+                        >
+                          <img
+                            src={item.image}
+                            alt={item.title}
+                            loading="lazy"
+                            onError={(e) => {
+                              const target = e.currentTarget;
+                              if (!target.dataset.triedFallback) {
+                                target.dataset.triedFallback = 'true';
+                                target.src = 'https://images.unsplash.com/photo-1526738549149-8e07eca6c147?w=400&auto=format&fit=crop&q=80';
+                              } else if (target.parentElement) {
+                                target.parentElement.style.display = 'none';
+                              }
+                            }}
+                            className="w-full h-44 sm:h-24 object-cover group-hover:scale-105 transition-transform duration-300"
+                          />
+                        </div>
                       )}
 
                       {/* Content */}
                       <div className="min-w-0 flex-1 w-full">
-                        {item.isManual && item.rawArticle ? (
-                          <button
-                            type="button"
-                            onClick={() => setReadingArticle(item.rawArticle!)}
-                            className="text-left text-lg sm:text-xl font-extrabold hover:text-primary transition-colors leading-snug block cursor-pointer"
-                            style={fontFraunces}
-                          >
-                            {item.title}
-                          </button>
-                        ) : (
-                          <a
-                            href={item.link}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-lg sm:text-xl font-extrabold hover:text-primary transition-colors leading-snug block"
-                            style={fontFraunces}
-                          >
-                            {item.title}
-                          </a>
-                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleOpenArticle(item)}
+                          className="text-left text-lg sm:text-xl font-extrabold hover:text-primary transition-colors leading-snug block cursor-pointer w-full"
+                          style={fontFraunces}
+                          title="Clicca per aprire l'articolo in popup"
+                        >
+                          {item.title}
+                        </button>
 
                         {item.description && (
-                          <p className="mt-1.5 text-xs text-muted-foreground line-clamp-3 leading-relaxed">
+                          <p
+                            onClick={() => handleOpenArticle(item)}
+                            className="mt-1.5 text-xs text-muted-foreground line-clamp-3 leading-relaxed cursor-pointer hover:text-foreground transition-colors"
+                            title="Clicca per leggere l'articolo in popup"
+                          >
                             {item.description}
                           </p>
                         )}
@@ -1752,27 +1749,30 @@ export default function App() {
                         {/* Footer Affordances on Article */}
                         <div className="mt-2.5 flex items-center justify-between gap-3 text-[11px] font-mono">
                           <div className="flex items-center gap-2.5 flex-wrap">
-                            {item.isManual && item.rawArticle ? (
-                              <button
-                                type="button"
-                                onClick={() => setReadingArticle(item.rawArticle!)}
-                                className="font-bold underline text-primary hover:text-foreground transition-colors flex items-center gap-1 py-1 cursor-pointer"
-                              >
-                                <span>📖 Leggi Articolo</span>
-                              </button>
-                            ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenArticle(item)}
+                              className="font-bold underline text-primary hover:text-foreground transition-colors flex items-center gap-1 py-1 cursor-pointer"
+                              title="Apri articolo all'interno del sito in popup"
+                            >
+                              <span>
+                                {item.isManual
+                                  ? '📖 Leggi Articolo'
+                                  : isAffiliateLink(item.link)
+                                  ? '🛍️ Scheda Offerta'
+                                  : '📖 Leggi Notizia'}
+                              </span>
+                            </button>
+
+                            {item.link && (
                               <a
                                 href={item.link}
                                 target="_blank"
                                 rel="noreferrer"
-                                className={`font-bold underline transition-colors flex items-center gap-1 py-1 ${
-                                  isAffiliateLink(item.link)
-                                    ? 'text-amber-800 hover:text-amber-950 font-extrabold'
-                                    : 'text-foreground hover:text-primary'
-                                }`}
+                                className="text-muted-foreground/70 hover:text-foreground text-[10px] flex items-center gap-0.5 py-1 underline"
+                                title="Apri direttamente la fonte originale in una nuova scheda"
                               >
-                                <span>{isAffiliateLink(item.link) ? 'Vedi Offerta Partner' : 'Apri notizia'}</span>
-                                <span>↗</span>
+                                <span>(Fonte esterna ↗)</span>
                               </a>
                             )}
 
