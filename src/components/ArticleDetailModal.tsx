@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ManualArticle } from '../lib/firebase';
+import { ManualArticle, SocialShareKit } from '../lib/firebase';
 import { ExternalLink, Calendar, User, Tag, Clock, Share2, Edit3, Trash2, Globe, Sparkles, Loader2, BookOpen } from 'lucide-react';
 import { FormattedArticleContent } from './FormattedArticleContent.tsx';
 import { AdSenseBanner } from './AdSenseBanner.tsx';
@@ -26,6 +26,7 @@ export interface ArticleDetailItem {
   metaDescription?: string;
   schemaType?: 'NewsArticle' | 'BlogPosting' | 'Product';
   rawArticle?: ManualArticle;
+  socialShare?: SocialShareKit;
 }
 
 interface ArticleDetailModalProps {
@@ -36,7 +37,7 @@ interface ArticleDetailModalProps {
   adminMode?: boolean;
   onEdit?: (article: ManualArticle) => void;
   onDelete?: (articleId: string) => void;
-  onShare?: (data: { title: string; text: string; url: string; image?: string; source?: string }) => void;
+  onShare?: (data: { title: string; text: string; url: string; image?: string; source?: string; socialShare?: SocialShareKit }) => void;
   onPrevArticle?: () => void;
   onNextArticle?: () => void;
   hasPrevArticle?: boolean;
@@ -480,13 +481,15 @@ export function ArticleDetailModal({
               <button
                 type="button"
                 onClick={() => {
+                  const activeSocial = article.socialShare || article.rawArticle?.socialShare;
                   if (onShare) {
                     onShare({
-                      title: article.title,
-                      text: article.description || `Leggi "${article.title}" su puulp.it:`,
+                      title: activeSocial?.ogTitle || article.title,
+                      text: activeSocial?.ogDescription || article.description || `Leggi "${article.title}" su puulp.it:`,
                       url: shareUrl,
                       image: article.image,
                       source: displaySource,
+                      socialShare: activeSocial,
                     });
                   } else {
                     handleCopyArticleLink();

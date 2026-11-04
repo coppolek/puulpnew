@@ -42,6 +42,8 @@ import { ShareModal, ShareData } from './components/ShareModal.tsx';
 import { AffiliateCategoryScraperModal } from './components/AffiliateCategoryScraperModal.tsx';
 import { ManualArticleModal } from './components/ManualArticleModal.tsx';
 import { ArticleDetailModal, ArticleDetailItem } from './components/ArticleDetailModal.tsx';
+import { OllamaAdminModal } from './components/OllamaAdminModal.tsx';
+import { TrendAnalyticsDashboard } from './components/TrendAnalyticsDashboard.tsx';
 
 const isAffiliateLink = (link: string): boolean => {
   if (!link) return false;
@@ -157,6 +159,9 @@ export default function App() {
   const [shareModalData, setShareModalData] = useState<ShareData | null>(null);
   const [isShareModalOpen, setIsShareModalOpen] = useState<boolean>(false);
 
+  // 24h Trend Analytics Dashboard Modal
+  const [showAnalyticsDashboard, setShowAnalyticsDashboard] = useState<boolean>(false);
+
   // New Page Modal State (for admin mode)
   const [showNewPageModal, setShowNewPageModal] = useState<boolean>(false);
   const [newPageTitle, setNewPageTitle] = useState('');
@@ -194,6 +199,9 @@ export default function App() {
 
   // Affiliate & Category Scraper Modal State
   const [showAffiliateModal, setShowAffiliateModal] = useState<boolean>(false);
+
+  // Ollama AI Super Administrator Modal State
+  const [showOllamaModal, setShowOllamaModal] = useState<boolean>(false);
 
   // Manual Editorial Articles & SEO state
   const [manualArticles, setManualArticles] = useState<ManualArticle[]>([]);
@@ -1268,8 +1276,20 @@ export default function App() {
             )}
           </div>
 
-          {/* Right Header Zone: Real-Time Notifications Bell & Admin Access */}
+          {/* Right Header Zone: Real-Time Notifications Bell, 24h Trend Dashboard & Admin Access */}
           <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
+            {/* 24h Trend Analytics Dashboard Trigger */}
+            <button
+              type="button"
+              onClick={() => setShowAnalyticsDashboard(true)}
+              className="border-2 border-border bg-background hover:bg-muted px-2.5 py-1.5 min-h-[38px] text-xs font-semibold uppercase transition-colors cursor-pointer flex items-center gap-1.5 shadow-[2px_2px_0_0_var(--foreground)] active:translate-x-0.5 active:translate-y-0.5"
+              title="Visualizza grafici e analisi sui trend tematici delle ultime 24 ore"
+            >
+              <span>📊</span>
+              <span className="hidden md:inline">Trend 24h</span>
+              <span className="md:hidden">Trend</span>
+            </button>
+
             {/* Real-time Notifications Bell */}
             <button
               type="button"
@@ -1315,6 +1335,15 @@ export default function App() {
                 >
                   <span className="text-amber-600 font-bold">💰</span>
                   <span className="hidden sm:inline">Monetizza Categorie</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowOllamaModal(true)}
+                  className="border-2 border-foreground bg-foreground text-background hover:opacity-90 px-2 sm:px-2.5 py-1.5 min-h-[38px] text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer flex items-center gap-1.5 shadow-[2px_2px_0_0_var(--primary)] active:translate-x-0.5 active:translate-y-0.5"
+                  title="Collega Ollama come amministratore per gestire intere pagine da prompt"
+                >
+                  <span className="text-sm">🤖</span>
+                  <span className="hidden sm:inline">Ollama AI</span>
                 </button>
                 <button
                   type="button"
@@ -1453,17 +1482,28 @@ export default function App() {
                   type="button"
                   onClick={() =>
                     handleOpenShare({
-                      title: `${activePage.title} — puulp.it`,
-                      text: `Scopri la rassegna e i feed di "${activePage.title}" su puulp.it:`,
+                      title: activePage.socialShare?.ogTitle || `${activePage.title} — puulp.it`,
+                      text: activePage.socialShare?.ogDescription || `Scopri la rassegna e i feed di "${activePage.title}" su puulp.it:`,
                       url: window.location.href,
                       source: activePage.category || 'puulp.it',
+                      socialShare: activePage.socialShare,
                     })
                   }
                   className="border-2 border-border bg-card px-2.5 sm:px-3 py-1.5 min-h-[38px] text-xs uppercase font-medium hover:bg-accent transition-colors cursor-pointer flex items-center gap-1.5 shadow-[2px_2px_0_0_var(--foreground)] active:translate-x-0.5 active:translate-y-0.5"
-                  title="Condividi questa pagina sui social"
+                  title="Condividi questa pagina sui social con copy elaborato da Ollama"
                 >
                   <span className="text-primary font-bold">📤</span>
                   <span>Condividi</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowAnalyticsDashboard(true)}
+                  className="border-2 border-border bg-card px-2.5 sm:px-3 py-1.5 min-h-[38px] text-xs uppercase font-medium hover:bg-accent transition-colors cursor-pointer flex items-center gap-1.5 shadow-[2px_2px_0_0_var(--foreground)] active:translate-x-0.5 active:translate-y-0.5"
+                  title="Grafici e trend tematici delle ultime 24 ore"
+                >
+                  <span className="text-primary font-bold">📊</span>
+                  <span>Trend 24h</span>
                 </button>
 
                 <button
@@ -1865,6 +1905,24 @@ export default function App() {
                               {copiedFeedId === item.link ? '✓ Copiato!' : 'Copia link'}
                             </button>
 
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleOpenShare({
+                                  title: item.rawArticle?.socialShare?.ogTitle || item.title,
+                                  text: item.rawArticle?.socialShare?.ogDescription || item.description || `Leggi "${item.title}" su puulp.it:`,
+                                  url: item.link,
+                                  image: item.image,
+                                  source: item.feedTitle,
+                                  socialShare: item.rawArticle?.socialShare,
+                                })
+                              }
+                              className="text-muted-foreground hover:text-primary cursor-pointer transition-colors py-1 flex items-center gap-1 font-semibold"
+                              title="Condividi articolo sui social con copy elaborato da Ollama"
+                            >
+                              <span>📤 Condividi</span>
+                            </button>
+
                             {/* In admin mode: edit/delete actions for manual articles */}
                             {isAdmin && adminMode && item.isManual && item.rawArticle && (
                               <div className="flex items-center gap-2 border-l border-border pl-2">
@@ -2058,6 +2116,29 @@ export default function App() {
               <span className="text-xs uppercase font-bold text-primary">
                 {savedFeeds.length} Feed nel DB
               </span>
+            </div>
+
+            {/* Promo Card: Ollama AI Super Administrator */}
+            <div className="mb-6 p-4 sm:p-5 rounded-xl border-2 border-primary bg-primary/5 shadow-[4px_4px_0_0_var(--foreground)] flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-2xl">🤖</span>
+                  <h4 className="font-extrabold text-sm sm:text-base text-foreground uppercase tracking-wide">
+                    Amministratore AI con Ollama (Gestione Pagine da Prompt)
+                  </h4>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1 max-w-2xl leading-relaxed">
+                  Collega il tuo modello locale (Llama 3.2, Mistral, Qwen, DeepSeek) per impostare da un singolo prompt la creazione di intere pagine tematiche, la selezione e scansione automatica dei feed RSS e la redazione di articoli editoriali SEO con codice.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowOllamaModal(true)}
+                className="px-4 py-2.5 rounded-lg bg-foreground hover:bg-foreground/90 text-background font-bold text-xs uppercase tracking-wider shadow-sm flex items-center gap-2 shrink-0 cursor-pointer transition-colors"
+              >
+                <span>Avvia Console Ollama</span>
+                <span>⚡</span>
+              </button>
             </div>
 
             {/* Promo Card: Scraping Categorie & Affiliati */}
@@ -2896,6 +2977,36 @@ export default function App() {
         hasNextArticle={hasNextArticle}
         currentIndex={readingArticleIndex >= 0 ? readingArticleIndex + 1 : undefined}
         totalArticles={displayedArticles.length}
+      />
+
+      {/* MODAL: OLLAMA AI SUPER ADMINISTRATOR */}
+      <OllamaAdminModal
+        isOpen={showOllamaModal}
+        onClose={() => setShowOllamaModal(false)}
+        pages={pages}
+        activePage={activePage}
+        onPageCreatedOrUpdated={(newPageId) => {
+          setActivePageId(newPageId);
+          setSelectedSourceFilter(null);
+          setSearchQuery('');
+        }}
+        onScrapeAndSaveFeed={async (feedUrl, feedInterval, targetPageId) => {
+          return await scrapeSingleUrl(feedUrl, feedInterval, targetPageId);
+        }}
+        onSaveEditorialArticle={handleSaveManualArticle}
+        onPublishNotification={publishLiveNotification}
+      />
+
+      {/* MODAL: 24-HOUR THEMATIC TREND ANALYTICS DASHBOARD */}
+      <TrendAnalyticsDashboard
+        isOpen={showAnalyticsDashboard}
+        onClose={() => setShowAnalyticsDashboard(false)}
+        savedFeeds={savedFeeds}
+        manualArticles={manualArticles}
+        pages={pages}
+        activePage={activePage}
+        onOpenArticle={handleOpenArticle}
+        onOpenShare={handleOpenShare}
       />
     </main>
   );

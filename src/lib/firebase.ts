@@ -117,6 +117,17 @@ export interface StoredFeed {
   }>;
 }
 
+export interface SocialShareKit {
+  ogTitle: string;
+  ogDescription: string;
+  twitterPost: string;
+  linkedInPost: string;
+  whatsAppMessage: string;
+  telegramMessage: string;
+  hashtags: string[];
+  callToAction: string;
+}
+
 export interface CustomPage {
   id: string;
   title: string;
@@ -124,6 +135,7 @@ export interface CustomPage {
   description?: string;
   category?: string;
   feedIds?: string[];
+  socialShare?: SocialShareKit;
   createdAt: string;
   updatedAt?: string;
 }
@@ -146,6 +158,7 @@ export interface ManualArticle {
   schemaType?: 'NewsArticle' | 'BlogPosting' | 'Product';
   price?: string;
   isManual?: boolean;
+  socialShare?: SocialShareKit;
   createdAt: string;
   updatedAt?: string;
 }
@@ -376,7 +389,7 @@ export async function createCustomPage(
   const pageId = generatePageId(page.slug);
   const path = `pages/${pageId}`;
 
-  const docData = {
+  const docData: Record<string, unknown> = {
     title: page.title.trim().slice(0, 200),
     slug: page.slug.trim().toLowerCase().replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 100),
     description: (page.description || '').trim().slice(0, 2000),
@@ -385,6 +398,10 @@ export async function createCustomPage(
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
+
+  if (page.socialShare) {
+    docData.socialShare = page.socialShare;
+  }
 
   try {
     await setDoc(doc(db, 'pages', pageId), docData);
@@ -409,6 +426,7 @@ export async function updateCustomPage(
   if (updates.description !== undefined) docData.description = updates.description.slice(0, 2000);
   if (updates.category !== undefined) docData.category = updates.category.slice(0, 100);
   if (updates.feedIds !== undefined) docData.feedIds = updates.feedIds;
+  if (updates.socialShare !== undefined) docData.socialShare = updates.socialShare;
 
   try {
     await setDoc(doc(db, 'pages', pageId), docData, { merge: true });
@@ -466,6 +484,7 @@ export function listenToCustomPages(
           description: data.description,
           category: data.category,
           feedIds: data.feedIds || [],
+          socialShare: data.socialShare,
           createdAt: data.createdAt,
           updatedAt: data.updatedAt,
         });
@@ -519,6 +538,7 @@ export async function saveManualArticle(
   if (article.metaDescription) docData.metaDescription = article.metaDescription.trim().slice(0, 320);
   if (article.schemaType) docData.schemaType = article.schemaType.trim().slice(0, 50);
   if (article.price) docData.price = article.price.trim().slice(0, 50);
+  if (article.socialShare) docData.socialShare = article.socialShare;
 
   try {
     await setDoc(doc(db, 'articles', articleId), docData, { merge: true });
@@ -566,6 +586,7 @@ export function listenToManualArticles(
           schemaType: data.schemaType || 'NewsArticle',
           price: data.price,
           isManual: data.isManual !== false,
+          socialShare: data.socialShare,
           createdAt: data.createdAt,
           updatedAt: data.updatedAt,
         });
