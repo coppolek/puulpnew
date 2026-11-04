@@ -37,6 +37,12 @@ interface ArticleDetailModalProps {
   onEdit?: (article: ManualArticle) => void;
   onDelete?: (articleId: string) => void;
   onShare?: (data: { title: string; text: string; url: string; image?: string; source?: string }) => void;
+  onPrevArticle?: () => void;
+  onNextArticle?: () => void;
+  hasPrevArticle?: boolean;
+  hasNextArticle?: boolean;
+  currentIndex?: number;
+  totalArticles?: number;
 }
 
 export function ArticleDetailModal({
@@ -48,6 +54,12 @@ export function ArticleDetailModal({
   onEdit,
   onDelete,
   onShare,
+  onPrevArticle,
+  onNextArticle,
+  hasPrevArticle,
+  hasNextArticle,
+  currentIndex,
+  totalArticles,
 }: ArticleDetailModalProps) {
   const [fullContent, setFullContent] = useState<string>('');
   const [loadingFullContent, setLoadingFullContent] = useState<boolean>(false);
@@ -95,16 +107,21 @@ export function ArticleDetailModal({
     }
   }, [article, isOpen]);
 
-  // Handle escape key to close popup
+  // Handle keyboard shortcuts (Escape to close, ArrowLeft for previous, ArrowRight for next/older)
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape' && isOpen) {
+      if (!isOpen) return;
+      if (e.key === 'Escape') {
         onClose();
+      } else if (e.key === 'ArrowLeft' && hasPrevArticle && onPrevArticle) {
+        onPrevArticle();
+      } else if (e.key === 'ArrowRight' && hasNextArticle && onNextArticle) {
+        onNextArticle();
       }
     }
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+  }, [isOpen, onClose, hasPrevArticle, hasNextArticle, onPrevArticle, onNextArticle]);
 
   // SEO and document head update
   useEffect(() => {
@@ -224,6 +241,36 @@ export function ArticleDetailModal({
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            {/* Quick Archive Navigation: Previous / Next article */}
+            {typeof totalArticles === 'number' && totalArticles > 1 && (
+              <div className="flex items-center border-2 border-border bg-card divide-x divide-border text-xs mr-1 sm:mr-2 shadow-[1px_1px_0_0_var(--foreground)]">
+                <button
+                  type="button"
+                  disabled={!hasPrevArticle}
+                  onClick={onPrevArticle}
+                  className="px-2 py-1 hover:bg-muted disabled:opacity-30 disabled:pointer-events-none cursor-pointer flex items-center gap-1 font-bold text-foreground"
+                  title="Articolo Precedente / Più recente (tasto freccia ←)"
+                >
+                  <span className="text-sm leading-none font-black">‹</span>
+                  <span className="hidden sm:inline text-[10px] uppercase tracking-wider">Più recente</span>
+                </button>
+                {typeof currentIndex === 'number' && (
+                  <span className="px-2 py-1 font-mono text-[10px] sm:text-[11px] text-muted-foreground font-semibold bg-muted/30">
+                    {currentIndex}/{totalArticles}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  disabled={!hasNextArticle}
+                  onClick={onNextArticle}
+                  className="px-2 py-1 hover:bg-muted disabled:opacity-30 disabled:pointer-events-none cursor-pointer flex items-center gap-1 font-bold text-foreground"
+                  title="Articolo Successivo / Più vecchio (tasto freccia →)"
+                >
+                  <span className="hidden sm:inline text-[10px] uppercase tracking-wider">Più vecchio</span>
+                  <span className="text-sm leading-none font-black">›</span>
+                </button>
+              </div>
+            )}
             {isAdmin && adminMode && article.isManual && (
               <>
                 {onEdit && (
@@ -384,6 +431,45 @@ export function ArticleDetailModal({
                 <span>{article.price || isAffiliate ? 'Vedi Offerta Partner' : 'Apri sul Sito Ufficiale'}</span>
                 <ExternalLink className="w-3.5 h-3.5" />
               </a>
+            </div>
+          )}
+
+          {/* Navigazione Archivio: Torna indietro sui vecchi articoli */}
+          {typeof totalArticles === 'number' && totalArticles > 1 && (
+            <div className="my-6 p-4 border-2 border-border bg-card shadow-[3px_3px_0_0_var(--foreground)] space-y-3">
+              <div className="flex items-center justify-between text-xs font-mono text-muted-foreground border-b border-border/40 pb-2">
+                <span className="font-bold text-foreground uppercase tracking-wider text-[11px]">
+                  📚 Sfoglia l'Archivio Articoli
+                </span>
+                <span>
+                  Articolo <strong>{currentIndex}</strong> di <strong>{totalArticles}</strong>
+                </span>
+              </div>
+              <div className="flex flex-col xs:flex-row items-stretch sm:items-center justify-between gap-2.5">
+                <button
+                  type="button"
+                  disabled={!hasPrevArticle}
+                  onClick={onPrevArticle}
+                  className="flex-1 border-2 border-border bg-background px-3 py-2 text-xs font-bold uppercase tracking-wider hover:bg-muted disabled:opacity-30 disabled:pointer-events-none flex items-center justify-center gap-1.5 cursor-pointer shadow-[1px_1px_0_0_var(--foreground)] active:translate-x-0.5 active:translate-y-0.5"
+                  title="Vai all'articolo più recente nell'archivio"
+                >
+                  <span>←</span>
+                  <span>Articolo Più Recente</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={!hasNextArticle}
+                  onClick={onNextArticle}
+                  className="flex-1 border-2 border-border bg-background px-3 py-2 text-xs font-bold uppercase tracking-wider hover:bg-muted disabled:opacity-30 disabled:pointer-events-none flex items-center justify-center gap-1.5 cursor-pointer shadow-[1px_1px_0_0_var(--foreground)] active:translate-x-0.5 active:translate-y-0.5"
+                  title="Vai all'articolo più vecchio nell'archivio"
+                >
+                  <span>Articolo Più Vecchio</span>
+                  <span>→</span>
+                </button>
+              </div>
+              <p className="text-[10px] text-center text-muted-foreground font-mono">
+                Suggerimento: puoi usare anche i tasti <strong>Freccia Sinistra (←)</strong> e <strong>Freccia Destra (→)</strong> sulla tastiera.
+              </p>
             </div>
           )}
 

@@ -25,7 +25,7 @@ service cloud.firestore {
         && (!('lastCheckedAt' in data) || (data.lastCheckedAt is string && data.lastCheckedAt.size() <= 100))
         && (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 100))
         && data.xml is string && data.xml.size() <= 500000
-        && (!('items' in data) || (data.items is list && data.items.size() <= 50))
+        && (!('items' in data) || (data.items is list && data.items.size() <= 300))
         && (!('pageId' in data) || (data.pageId is string && data.pageId.size() <= 128));
     }
 

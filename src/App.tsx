@@ -201,6 +201,11 @@ export default function App() {
   const [articleToEdit, setArticleToEdit] = useState<ManualArticle | null>(null);
   const [readingArticle, setReadingArticle] = useState<ArticleDetailItem | null>(null);
 
+  // Timeline Pagination, Archive Navigation & Sorting state
+  const [sortOrder, setSortOrder] = useState<'newest' | 'oldest'>('newest');
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number | 'all'>(20);
+
   // Listen to Firestore database, Auth state, and Notifications on boot
   useEffect(() => {
     testConnection()
@@ -510,16 +515,16 @@ export default function App() {
 
     list.sort((a, b) => {
       // If both published on same date and one is manual, show manual editorial first
-      if (a.isManual && !b.isManual && a.date === b.date) return -1;
+      if (a.isManual && !b.isManual && a.date === b.date) return sortOrder === 'newest' ? -1 : 1;
       if (!a.date || !b.date) return 0;
       const timeA = new Date(a.date).getTime();
       const timeB = new Date(b.date).getTime();
       if (isNaN(timeA) || isNaN(timeB)) return 0;
-      return timeB - timeA;
+      return sortOrder === 'newest' ? timeB - timeA : timeA - timeB;
     });
 
     return list;
-  }, [searchScope, pageFeeds, savedFeeds, manualArticles, activePage]);
+  }, [searchScope, pageFeeds, savedFeeds, manualArticles, activePage, sortOrder]);
 
   async function handleSaveManualArticle(
     data: Omit<ManualArticle, 'id' | 'createdAt'> & { id?: string; createdAt?: string }
@@ -577,6 +582,42 @@ export default function App() {
 
     return filtered;
   }, [scopedArticles, selectedSourceFilter, searchScope, searchQuery]);
+
+  // Reset pagination to page 1 whenever filters, search, page or sort change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activePageId, searchQuery, selectedSourceFilter, searchScope, sortOrder, pageSize]);
+
+  const effectivePageSize = pageSize === 'all' ? Math.max(1, displayedArticles.length) : pageSize;
+  const totalPages = Math.max(1, Math.ceil(displayedArticles.length / effectivePageSize));
+  const validCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
+
+  const paginatedArticles = useMemo(() => {
+    if (pageSize === 'all') return displayedArticles;
+    const start = (validCurrentPage - 1) * pageSize;
+    return displayedArticles.slice(start, start + pageSize);
+  }, [displayedArticles, validCurrentPage, pageSize]);
+
+  // Index and navigation inside in-app article popup reader
+  const readingArticleIndex = useMemo(() => {
+    if (!readingArticle) return -1;
+    return displayedArticles.findIndex((a) => a.link === readingArticle.link);
+  }, [readingArticle, displayedArticles]);
+
+  const hasPrevArticle = readingArticleIndex > 0;
+  const hasNextArticle = readingArticleIndex >= 0 && readingArticleIndex < displayedArticles.length - 1;
+
+  function handlePrevArticle() {
+    if (readingArticleIndex > 0) {
+      handleOpenArticle(displayedArticles[readingArticleIndex - 1]);
+    }
+  }
+
+  function handleNextArticle() {
+    if (readingArticleIndex >= 0 && readingArticleIndex < displayedArticles.length - 1) {
+      handleOpenArticle(displayedArticles[readingArticleIndex + 1]);
+    }
+  }
 
   // Feeds available in the database that are NOT yet in this page
   const availableDbFeedsForActivePage = useMemo(() => {
@@ -1521,42 +1562,64 @@ export default function App() {
               )}
             </div>
 
-            {/* Search Scope selector & Results info */}
-            <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground px-1">
-              <div className="flex items-center gap-1.5 sm:gap-2">
-                <span className="uppercase text-[10px] sm:text-[11px] font-semibold">Ambito:</span>
-                <button
-                  type="button"
-                  onClick={() => setSearchScope('page')}
-                  className={`px-2.5 py-1 min-h-[32px] border cursor-pointer transition-colors ${
-                    searchScope === 'page'
-                      ? 'border-foreground bg-foreground text-background font-bold'
-                      : 'border-border/60 hover:bg-muted text-muted-foreground'
-                  }`}
-                >
-                  {activePage ? activePage.title : 'Pagina corrente'}
-                </button>
-                {pages.length > 1 && (
+            {/* Search Scope selector, Sort Order & Results info */}
+            <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2.5 text-xs text-muted-foreground px-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-1.5">
+                  <span className="uppercase text-[10px] sm:text-[11px] font-semibold">Ambito:</span>
                   <button
                     type="button"
-                    onClick={() => setSearchScope('all')}
+                    onClick={() => setSearchScope('page')}
                     className={`px-2.5 py-1 min-h-[32px] border cursor-pointer transition-colors ${
-                      searchScope === 'all'
+                      searchScope === 'page'
                         ? 'border-foreground bg-foreground text-background font-bold'
                         : 'border-border/60 hover:bg-muted text-muted-foreground'
                     }`}
                   >
-                    Tutte le Pagine
+                    {activePage ? activePage.title : 'Pagina corrente'}
                   </button>
-                )}
+                  {pages.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => setSearchScope('all')}
+                      className={`px-2.5 py-1 min-h-[32px] border cursor-pointer transition-colors ${
+                        searchScope === 'all'
+                          ? 'border-foreground bg-foreground text-background font-bold'
+                          : 'border-border/60 hover:bg-muted text-muted-foreground'
+                      }`}
+                    >
+                      Tutte le Pagine
+                    </button>
+                  )}
+                </div>
+
+                {/* Sorter: Più recenti vs Più vecchi per andare indietro nell'archivio */}
+                <div className="flex items-center gap-1.5 border-l border-border/50 pl-2">
+                  <span className="uppercase text-[10px] sm:text-[11px] font-semibold">Cronologia:</span>
+                  <button
+                    type="button"
+                    onClick={() => setSortOrder(sortOrder === 'newest' ? 'oldest' : 'newest')}
+                    className="px-2.5 py-1 min-h-[32px] border border-border/70 bg-card hover:border-foreground text-foreground text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+                    title="Alterna tra articoli più recenti e articoli storici più vecchi"
+                  >
+                    <span>{sortOrder === 'newest' ? '🕒 Più Recenti Prima' : '📜 Più Vecchi Prima (Archivio)'}</span>
+                    <span className="text-primary text-[10px] font-bold">⇄</span>
+                  </button>
+                </div>
               </div>
 
-              {searchQuery.trim() && (
-                <span className="text-foreground text-[11px] sm:text-xs">
-                  Trovati <strong className="font-bold text-primary">{displayedArticles.length}</strong>{' '}
-                  {displayedArticles.length === 1 ? 'articolo' : 'articoli'}
-                </span>
-              )}
+              <div className="flex items-center gap-3">
+                {searchQuery.trim() ? (
+                  <span className="text-foreground text-[11px] sm:text-xs">
+                    Trovati <strong className="font-bold text-primary">{displayedArticles.length}</strong>{' '}
+                    {displayedArticles.length === 1 ? 'articolo' : 'articoli'}
+                  </span>
+                ) : (
+                  <span className="text-[11px] font-mono text-muted-foreground">
+                    Archivio: <strong className="text-foreground">{displayedArticles.length}</strong> articoli totali
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 
@@ -1608,7 +1671,7 @@ export default function App() {
         )}
 
         {/* ARTICLES TIMELINE LIST */}
-        <section className="mt-6 sm:mt-8">
+        <section id="articles-timeline-section" className="mt-6 sm:mt-8">
           {displayedArticles.length === 0 ? (
             <div className="border-2 border-dashed border-border/40 p-8 sm:p-12 text-center text-xs text-muted-foreground">
               {searchQuery.trim() ? (
@@ -1645,18 +1708,20 @@ export default function App() {
             </div>
           ) : (
             <ol className="divide-y divide-border/30">
-              {displayedArticles.map((item, idx) => (
-                <React.Fragment key={item.link + idx}>
-                  <li className="py-4 sm:py-5 hover:bg-muted/10 transition-colors">
-                    {/* Top kicker bar on mobile and desktop */}
-                    <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground mb-2">
-                      <div className="flex items-center gap-2 min-w-0 truncate">
-                        <span
-                          className="text-lg sm:text-xl font-extrabold text-primary shrink-0 select-none"
-                          style={fontFraunces}
-                        >
-                          {String(idx + 1).padStart(2, '0')}
-                        </span>
+              {paginatedArticles.map((item, idx) => {
+                const globalIdx = pageSize === 'all' ? idx : (validCurrentPage - 1) * pageSize + idx;
+                return (
+                  <React.Fragment key={item.link + idx}>
+                    <li className="py-4 sm:py-5 hover:bg-muted/10 transition-colors">
+                      {/* Top kicker bar on mobile and desktop */}
+                      <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground mb-2">
+                        <div className="flex items-center gap-2 min-w-0 truncate">
+                          <span
+                            className="text-lg sm:text-xl font-extrabold text-primary shrink-0 select-none"
+                            style={fontFraunces}
+                          >
+                            {String(globalIdx + 1).padStart(2, '0')}
+                          </span>
                         <span className="font-bold text-foreground uppercase tracking-wider text-[11px] truncate flex items-center gap-1.5">
                           {item.feedTitle}
                           {item.isManual && (
@@ -1862,10 +1927,121 @@ export default function App() {
                     </li>
                   )}
                 </React.Fragment>
+              );
+            })}
+          </ol>
+        )}
+
+        {/* Navigazione Archivio & Paginazione: Sfoglia gli articoli storici */}
+        {displayedArticles.length > 0 && (
+          <div className="mt-8 pt-6 border-t-2 border-border flex flex-col md:flex-row items-center justify-between gap-4">
+            {/* Info Archivio & Conteggio */}
+            <div className="text-xs text-muted-foreground font-mono">
+              <span>
+                Archivio: Visualizzati{' '}
+                <strong className="text-foreground">
+                  {pageSize === 'all'
+                    ? `tutti i ${displayedArticles.length}`
+                    : `${(validCurrentPage - 1) * (typeof pageSize === 'number' ? pageSize : 20) + 1} - ${Math.min(
+                        validCurrentPage * (typeof pageSize === 'number' ? pageSize : 20),
+                        displayedArticles.length
+                      )}`}
+                </strong>{' '}
+                di <strong className="text-primary">{displayedArticles.length}</strong> articoli
+              </span>
+            </div>
+
+            {/* Pulsanti Paginazione */}
+            {totalPages > 1 && pageSize !== 'all' && (
+              <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap justify-center">
+                <button
+                  type="button"
+                  disabled={validCurrentPage <= 1}
+                  onClick={() => {
+                    setCurrentPage((p) => Math.max(1, p - 1));
+                    document.getElementById('articles-timeline-section')?.scrollIntoView({ behavior: 'smooth' });
+                  }}
+                  className="px-3 py-1.5 min-h-[36px] border-2 border-border bg-card text-xs font-bold uppercase tracking-wider hover:bg-muted disabled:opacity-30 disabled:pointer-events-none cursor-pointer shadow-[1px_1px_0_0_var(--foreground)] active:translate-x-0.5 active:translate-y-0.5"
+                  title="Torna agli articoli più recenti"
+                >
+                  ← Più Recenti
+                </button>
+
+                {/* Numeri Pagine */}
+                <div className="flex items-center gap-1 mx-1">
+                  {Array.from({ length: totalPages }, (_, i) => i + 1)
+                    .filter((p) => {
+                      return (
+                        p === 1 ||
+                        p === totalPages ||
+                        Math.abs(p - validCurrentPage) <= 2
+                      );
+                    })
+                    .map((p, pIdx, arr) => {
+                      const prev = arr[pIdx - 1];
+                      const showEllipsis = prev && p - prev > 1;
+                      return (
+                        <React.Fragment key={p}>
+                          {showEllipsis && (
+                            <span className="px-1 text-muted-foreground font-mono text-xs select-none">
+                              …
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCurrentPage(p);
+                              document.getElementById('articles-timeline-section')?.scrollIntoView({ behavior: 'smooth' });
+                            }}
+                            className={`w-8 h-8 flex items-center justify-center text-xs font-bold font-mono border-2 cursor-pointer transition-colors ${
+                              p === validCurrentPage
+                                ? 'border-primary bg-primary text-primary-foreground shadow-[2px_2px_0_0_var(--foreground)]'
+                                : 'border-border bg-card hover:bg-muted text-foreground'
+                            }`}
+                          >
+                            {p}
+                          </button>
+                        </React.Fragment>
+                      );
+                    })}
+                </div>
+
+                <button
+                  type="button"
+                  disabled={validCurrentPage >= totalPages}
+                  onClick={() => {
+                    setCurrentPage((p) => Math.min(totalPages, p + 1));
+                    document.getElementById('articles-timeline-section')?.scrollIntoView({ behavior: 'smooth' });
+                  }}
+                  className="px-3 py-1.5 min-h-[36px] border-2 border-border bg-card text-xs font-bold uppercase tracking-wider hover:bg-muted disabled:opacity-30 disabled:pointer-events-none cursor-pointer shadow-[1px_1px_0_0_var(--foreground)] active:translate-x-0.5 active:translate-y-0.5"
+                  title="Vai indietro sui vecchi articoli dell'archivio"
+                >
+                  Più Vecchi →
+                </button>
+              </div>
+            )}
+
+            {/* Selettore dimensione pagina */}
+            <div className="flex items-center gap-1.5 text-xs font-mono text-muted-foreground">
+              <span>Per pagina:</span>
+              {[20, 50, 'all'].map((size) => (
+                <button
+                  key={size}
+                  type="button"
+                  onClick={() => setPageSize(size as number | 'all')}
+                  className={`px-2 py-1 border text-xs cursor-pointer font-bold ${
+                    pageSize === size
+                      ? 'border-foreground bg-foreground text-background'
+                      : 'border-border/60 hover:bg-muted text-muted-foreground'
+                  }`}
+                >
+                  {size === 'all' ? 'Tutti' : size}
+                </button>
               ))}
-            </ol>
-          )}
-        </section>
+            </div>
+          </div>
+        )}
+      </section>
 
         {/* ADMIN TOOLING (Only visible to authenticated editor when adminMode is active) */}
         {isAdmin && adminMode && (
@@ -2714,6 +2890,12 @@ export default function App() {
         }}
         onDelete={handleDeleteManualArticle}
         onShare={handleOpenShare}
+        onPrevArticle={handlePrevArticle}
+        onNextArticle={handleNextArticle}
+        hasPrevArticle={hasPrevArticle}
+        hasNextArticle={hasNextArticle}
+        currentIndex={readingArticleIndex >= 0 ? readingArticleIndex + 1 : undefined}
+        totalArticles={displayedArticles.length}
       />
     </main>
   );

@@ -10,6 +10,7 @@ import {
 import {
   getFirestore,
   doc,
+  getDoc,
   setDoc,
   deleteDoc,
   collection,
@@ -217,27 +218,95 @@ export function generateSubscriptionId(email: string): string {
   return `sub_${cleanEmail}_${hash}`.slice(0, 80);
 }
 
-// Save or Update Feed in Firestore
+// Save or Update Feed in Firestore with article merging and archive history
 export async function saveFeedToDatabase(feed: Omit<StoredFeed, 'id' | 'createdAt'>): Promise<string> {
   const feedId = generateFeedId(feed.url);
   const path = `feeds/${feedId}`;
+  const feedRef = doc(db, 'feeds', feedId);
+
+  let existingItems: Array<{
+    title: string;
+    link: string;
+    date?: string;
+    description?: string;
+    image?: string;
+  }> = [];
+  let existingCreatedAt: string | undefined;
+
+  try {
+    const snap = await getDoc(feedRef);
+    if (snap.exists()) {
+      const data = snap.data();
+      if (Array.isArray(data.items)) {
+        existingItems = data.items;
+      }
+      if (data.createdAt) {
+        existingCreatedAt = data.createdAt;
+      }
+    }
+  } catch (err) {
+    console.warn('Note: could not read existing feed for article merging:', err);
+  }
+
+  // Deduplication key normalizer
+  function cleanItemUrl(urlStr: string): string {
+    return (urlStr || '').trim().toLowerCase().replace(/\/+$/, '');
+  }
+
+  const seenUrls = new Set<string>();
+  const mergedItems: Array<{
+    title: string;
+    link: string;
+    date?: string;
+    description?: string;
+    image?: string;
+  }> = [];
+
+  // 1. Fresh items from current scrape (latest updates)
+  for (const it of feed.items || []) {
+    if (!it.link || !it.title) continue;
+    const cleanUrl = cleanItemUrl(it.link);
+    if (!seenUrls.has(cleanUrl)) {
+      seenUrls.add(cleanUrl);
+      mergedItems.push({
+        title: it.title.slice(0, 500),
+        link: it.link.slice(0, 2048),
+        date: it.date ? it.date.slice(0, 100) : '',
+        description: it.description ? it.description.slice(0, 2000) : '',
+        image: it.image ? it.image.slice(0, 2048) : '',
+      });
+    }
+  }
+
+  // 2. Preserve historical older articles so they are never lost on feed updates
+  for (const oldIt of existingItems) {
+    if (!oldIt.link || !oldIt.title) continue;
+    const cleanUrl = cleanItemUrl(oldIt.link);
+    if (!seenUrls.has(cleanUrl)) {
+      seenUrls.add(cleanUrl);
+      mergedItems.push({
+        title: oldIt.title.slice(0, 500),
+        link: oldIt.link.slice(0, 2048),
+        date: oldIt.date ? oldIt.date.slice(0, 100) : '',
+        description: oldIt.description ? oldIt.description.slice(0, 2000) : '',
+        image: oldIt.image ? oldIt.image.slice(0, 2048) : '',
+      });
+    }
+  }
+
+  // 3. Keep generous archive up to 250 items per feed (conforming to firestore.rules <= 300)
+  const cappedItems = mergedItems.slice(0, 250);
 
   const docData: Record<string, unknown> = {
     url: feed.url.slice(0, 2048),
     title: feed.title.slice(0, 500),
     description: (feed.description || '').slice(0, 2000),
     interval: Math.max(15, Math.min(1440, feed.interval)),
-    itemsCount: feed.items.length,
+    itemsCount: cappedItems.length,
     lastCheckedAt: feed.lastCheckedAt || new Date().toISOString(),
-    createdAt: new Date().toISOString(),
+    createdAt: existingCreatedAt || new Date().toISOString(),
     xml: feed.xml.slice(0, 500000),
-    items: feed.items.slice(0, 50).map((it) => ({
-      title: it.title.slice(0, 500),
-      link: it.link.slice(0, 2048),
-      date: it.date ? it.date.slice(0, 100) : '',
-      description: it.description ? it.description.slice(0, 2000) : '',
-      image: it.image ? it.image.slice(0, 2048) : '',
-    })),
+    items: cappedItems,
   };
 
   if (feed.pageId) {
@@ -245,7 +314,7 @@ export async function saveFeedToDatabase(feed: Omit<StoredFeed, 'id' | 'createdA
   }
 
   try {
-    await setDoc(doc(db, 'feeds', feedId), docData, { merge: true });
+    await setDoc(feedRef, docData, { merge: true });
     return feedId;
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
