@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { ManualArticle } from '../lib/firebase';
 import { ExternalLink, Calendar, User, Tag, Clock, Share2, Edit3, Trash2, Globe, Sparkles, Loader2, BookOpen } from 'lucide-react';
 import { FormattedArticleContent } from './FormattedArticleContent.tsx';
+import { AdSenseBanner } from './AdSenseBanner.tsx';
 
 export interface ArticleDetailItem {
   id?: string;
@@ -320,6 +321,16 @@ export function ArticleDetailModal({
             </div>
           )}
 
+          {/* BANNER 1: DOPO L'IMMAGINE */}
+          <div className="pt-1">
+            <AdSenseBanner
+              position="after-image"
+              label="📢 Annuncio Sponsorizzato · Top Articolo"
+              customDescription="Spazio promozionale verificato puulp.it · Google AdSense & Inserzioni Partner"
+              customDate={displayDate}
+            />
+          </div>
+
           {/* Lead Summary */}
           {article.description && (
             <div className="text-base sm:text-lg font-medium text-foreground/90 italic leading-relaxed border-l-4 border-primary pl-4 py-0.5">
@@ -341,6 +352,16 @@ export function ArticleDetailModal({
                 </p>
               </div>
             ) : null}
+          </div>
+
+          {/* BANNER 2: A FINE ARTICOLO */}
+          <div className="pt-2">
+            <AdSenseBanner
+              position="end-of-article"
+              label="📢 Annuncio Consigliato · Fine Lettura"
+              customDescription="Inserzione promozionale di chiusura articolo · Supporta la gestione e l'accesso gratuito ai feed di puulp.it"
+              customDate={displayDate}
+            />
           </div>
 
           {/* Optional External Offer / Source Link */}
