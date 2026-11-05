@@ -19,6 +19,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { StoredFeed, CustomPage, ManualArticle, SocialShareKit } from '../lib/firebase';
+import { buildSiteArticleUrl, getArticleSiteSlug } from '../lib/shareUtils';
 import { ShareData } from './ShareModal';
 
 export interface TrendAnalyticsItem {
@@ -570,21 +571,24 @@ export function TrendAnalyticsDashboard({
       role="dialog"
       aria-modal="true"
       aria-labelledby="analytics-dashboard-title"
-      className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 md:p-6 bg-black/75 backdrop-blur-sm overflow-y-auto"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 md:p-6 bg-black/75 backdrop-blur-sm overflow-y-auto"
     >
-      <div className="relative w-full max-w-6xl bg-card border-2 border-border shadow-2xl rounded-xl overflow-hidden flex flex-col my-auto max-h-[94vh]">
+      <div className="relative w-full max-w-6xl bg-card border-t-3 sm:border-2 border-border shadow-2xl rounded-t-2xl sm:rounded-xl overflow-hidden flex flex-col mt-auto sm:my-auto max-h-[94dvh] sm:max-h-[94vh] pb-safe">
+        {/* Mobile Drag Handle */}
+        <div className="w-10 h-1.5 bg-border/30 rounded-full mx-auto mt-2.5 mb-1 sm:hidden shrink-0" />
+
         {/* Top Header Bar */}
-        <div className="flex items-center justify-between border-b border-border bg-muted/40 px-4 sm:px-6 py-3.5 shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="h-9 w-9 rounded-lg bg-primary/10 border border-primary/30 flex items-center justify-center text-primary">
+        <div className="flex items-center justify-between border-b border-border bg-muted/40 px-3.5 sm:px-6 py-3 shrink-0">
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+            <div className="h-9 w-9 rounded-lg bg-primary/10 border border-primary/30 flex items-center justify-center text-primary shrink-0">
               <TrendingUp className="h-5 w-5" />
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 id="analytics-dashboard-title" className="text-base sm:text-lg font-bold text-foreground">
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                <h2 id="analytics-dashboard-title" className="text-sm sm:text-lg font-bold text-foreground truncate">
                   Dashboard Analisi Trend
                 </h2>
-                <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-primary/15 text-primary border border-primary/30">
+                <span className="text-[10px] sm:text-xs font-mono font-bold px-2 py-0.5 rounded bg-primary/15 text-primary border border-primary/30 shrink-0">
                   {timeRange === '24h' ? 'Ultime 24 Ore' : timeRange === '48h' ? 'Ultime 48 Ore' : timeRange === '7d' ? 'Ultimi 7 Giorni' : 'Archivio Completo'}
                 </span>
               </div>
@@ -594,12 +598,12 @@ export function TrendAnalyticsDashboard({
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
               onClick={handleRunAiAnalysis}
               disabled={aiAnalysisLoading}
-              className="border border-border bg-background hover:bg-muted text-foreground px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer flex items-center gap-1.5 transition-colors shadow-sm disabled:opacity-50"
+              className="border border-border bg-background hover:bg-muted text-foreground px-3 py-2 min-h-[40px] rounded-lg text-xs font-semibold cursor-pointer flex items-center gap-1.5 transition-colors shadow-sm disabled:opacity-50"
               title="Elabora sintesi strategica con Ollama AI"
             >
               <Sparkles className={`h-3.5 w-3.5 text-primary ${aiAnalysisLoading ? 'animate-spin' : ''}`} />
@@ -610,7 +614,7 @@ export function TrendAnalyticsDashboard({
             <button
               type="button"
               onClick={onClose}
-              className="border border-border/80 bg-background hover:bg-destructive hover:text-white hover:border-destructive text-muted-foreground h-8 w-8 rounded-lg flex items-center justify-center cursor-pointer transition-colors"
+              className="border border-border/80 bg-background hover:bg-destructive hover:text-white hover:border-destructive text-muted-foreground h-10 w-10 rounded-lg flex items-center justify-center cursor-pointer transition-colors"
               aria-label="Chiudi dashboard"
             >
               <X className="h-4 w-4" />
@@ -619,7 +623,7 @@ export function TrendAnalyticsDashboard({
         </div>
 
         {/* Filter Controls Bar */}
-        <div className="bg-background/95 border-b border-border px-4 sm:px-6 py-2.5 flex flex-wrap items-center justify-between gap-3 shrink-0">
+        <div className="bg-background/95 border-b border-border px-3.5 sm:px-6 py-2.5 flex flex-wrap items-center justify-between gap-2.5 shrink-0">
           {/* Time range selector tabs */}
           <div className="flex items-center gap-1 p-1 bg-muted/60 rounded-lg border border-border/60">
             {(
@@ -1059,20 +1063,20 @@ export function TrendAnalyticsDashboard({
               </div>
 
               {/* Active Filter Indicators & Search Bar */}
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 w-full sm:w-auto">
                 <input
                   type="text"
                   value={searchFilter}
                   onChange={(e) => setSearchFilter(e.target.value)}
                   placeholder="Cerca negli articoli..."
-                  className="border border-border bg-background px-2.5 py-1 text-xs rounded-md w-44 sm:w-56 focus:outline-none focus:ring-1 focus:ring-primary"
+                  className="border border-border bg-background px-3 py-2 min-h-[42px] text-base sm:text-xs rounded-md flex-1 sm:w-56 focus:outline-none focus:ring-1 focus:ring-primary"
                 />
 
                 {(selectedCategoryKey || selectedKeyword || selectedHourBucket !== null || searchFilter) && (
                   <button
                     type="button"
                     onClick={handleResetFilters}
-                    className="border border-border bg-muted/60 hover:bg-muted text-foreground text-xs px-2.5 py-1 rounded-md font-medium cursor-pointer"
+                    className="border border-border bg-muted/60 hover:bg-muted text-foreground text-xs px-3 py-2 min-h-[42px] rounded-md font-medium cursor-pointer shrink-0"
                   >
                     Azzera
                   </button>
@@ -1086,76 +1090,98 @@ export function TrendAnalyticsDashboard({
                 Nessun articolo corrisponde ai filtri selezionati. Prova a reimpostare i filtri.
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-80 overflow-y-auto pr-1">
-                {filteredArticles.slice(0, 40).map((art) => (
-                  <div
-                    key={art.id}
-                    className="border border-border bg-background/60 hover:bg-muted/40 p-3 rounded-lg flex flex-col justify-between transition-colors group"
-                  >
-                    <div>
-                      <div className="flex items-center justify-between text-[11px] text-muted-foreground mb-1 gap-2">
-                        <span className="font-semibold text-primary truncate">{art.feedTitle}</span>
-                        <span className="font-mono shrink-0 tabular-nums">
-                          {art.date ? new Date(art.date).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }) : '24h'}
-                        </span>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-96 overflow-y-auto pr-1">
+                {filteredArticles.slice(0, 40).map((art) => {
+                  const siteArtUrl = buildSiteArticleUrl(
+                    {
+                      id: art.id,
+                      title: art.title,
+                      link: art.link,
+                      rawArticle: art.rawArticle,
+                    },
+                    activePage?.slug || activePage?.id
+                  );
+
+                  return (
+                    <div
+                      key={art.id}
+                      className="border border-border bg-background/60 hover:bg-muted/40 p-3.5 rounded-lg flex flex-col justify-between transition-colors group"
+                    >
+                      <div>
+                        <div className="flex items-center justify-between text-[11px] text-muted-foreground mb-1 gap-2">
+                          <span className="font-semibold text-primary truncate">{art.feedTitle}</span>
+                          <span className="font-mono shrink-0 tabular-nums">
+                            {art.date ? new Date(art.date).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }) : '24h'}
+                          </span>
+                        </div>
+                        <h4
+                          onClick={() => {
+                            onClose();
+                            onOpenArticle(art);
+                          }}
+                          className="text-sm font-bold text-foreground leading-snug line-clamp-2 group-hover:text-primary transition-colors cursor-pointer"
+                        >
+                          {art.title}
+                        </h4>
+                        {art.description && (
+                          <p className="text-xs text-muted-foreground line-clamp-2 mt-1 leading-normal">
+                            {art.description}
+                          </p>
+                        )}
                       </div>
-                      <h4 className="text-xs sm:text-sm font-bold text-foreground leading-snug line-clamp-2 group-hover:text-primary transition-colors">
-                        {art.title}
-                      </h4>
-                      {art.description && (
-                        <p className="text-[11px] text-muted-foreground line-clamp-2 mt-1 leading-normal">
-                          {art.description}
-                        </p>
-                      )}
-                    </div>
 
-                    <div className="flex items-center justify-between pt-3 mt-2 border-t border-border/40">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onClose();
-                          onOpenArticle(art);
-                        }}
-                        className="text-xs font-semibold text-primary hover:underline cursor-pointer flex items-center gap-1"
-                      >
-                        <span>Leggi Articolo</span>
-                        <ChevronRight className="h-3 w-3" />
-                      </button>
+                      <div className="flex items-center justify-between pt-3 mt-2.5 border-t border-border/40 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onClose();
+                            onOpenArticle(art);
+                          }}
+                          className="text-xs font-bold text-primary hover:underline cursor-pointer flex items-center gap-1 min-h-[38px] px-2 -ml-2 rounded hover:bg-primary/5"
+                        >
+                          <span>Leggi sul Sito</span>
+                          <ChevronRight className="h-3.5 w-3.5" />
+                        </button>
 
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onOpenShare({
-                            title: art.socialShare?.ogTitle || art.title,
-                            text: art.socialShare?.ogDescription || art.description || art.title,
-                            url: art.link,
-                            source: art.feedTitle,
-                            socialShare: art.socialShare,
-                          });
-                        }}
-                        className="text-muted-foreground hover:text-foreground text-xs flex items-center gap-1 cursor-pointer p-1 rounded hover:bg-muted"
-                        title="Condividi con kit Ollama"
-                      >
-                        <Share2 className="h-3.5 w-3.5" />
-                        <span className="text-[10px]">Condividi</span>
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onOpenShare({
+                              title: art.socialShare?.ogTitle || art.title,
+                              text: art.socialShare?.ogDescription || art.description || `Leggi "${art.title}" su puulp.it:`,
+                              url: siteArtUrl,
+                              externalSourceUrl: art.link,
+                              pageSlug: activePage?.slug || activePage?.id,
+                              articleSlug: getArticleSiteSlug(art),
+                              image: art.image,
+                              source: art.feedTitle,
+                              socialShare: art.socialShare,
+                            });
+                          }}
+                          className="border border-border/80 bg-card hover:bg-muted text-foreground text-xs font-semibold flex items-center gap-1.5 cursor-pointer px-3 py-1.5 min-h-[38px] rounded shadow-xs"
+                          title="Condividi link al sito con kit Ollama"
+                        >
+                          <Share2 className="h-3.5 w-3.5 text-primary" />
+                          <span>Condividi Sito</span>
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
         </div>
 
         {/* Footer */}
-        <div className="border-t border-border bg-muted/30 px-6 py-3 flex items-center justify-between text-xs text-muted-foreground shrink-0">
-          <span>
-            Dati calcolati in tempo reale dai feed RSS e archivio database di puulp.it
+        <div className="border-t border-border bg-muted/30 px-4 sm:px-6 py-3 flex items-center justify-between text-xs text-muted-foreground shrink-0">
+          <span className="truncate mr-2">
+            Dati calcolati in tempo reale su puulp.it
           </span>
           <button
             type="button"
             onClick={onClose}
-            className="border border-border bg-background hover:bg-muted text-foreground px-4 py-1.5 rounded-lg text-xs font-semibold cursor-pointer"
+            className="border border-border bg-background hover:bg-muted text-foreground px-4 py-2 min-h-[40px] rounded-lg text-xs font-semibold cursor-pointer shrink-0"
           >
             Chiudi Dashboard
           </button>

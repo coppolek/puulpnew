@@ -2804,6 +2804,130 @@ Struttura JSON obbligatoria:
     }
   });
 
+  // API Route: Elaborate Social Share Kit with Ollama for any Article or Page
+  app.post('/api/ollama/social-kit', async (req: Request, res: Response) => {
+    try {
+      const {
+        title = 'Articolo su puulp.it',
+        description = '',
+        source = 'puulp.it',
+        endpoint: rawEndpoint = 'http://localhost:11434',
+        model = 'llama3.2',
+      } = req.body || {};
+
+      const cleanTitle = String(title).trim();
+      const cleanDesc = String(description).trim();
+      const cleanSource = String(source).trim();
+      const endpoint = String(rawEndpoint).trim().replace(/\/+$/, '');
+      const isLocalhostEndpoint = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(endpoint);
+
+      const systemPrompt = `Sei il Social Media Manager AI di puulp.it.
+Elabora un kit di condivisione social in formato JSON valido che inviti gli utenti a cliccare sul link e leggere la notizia direttamente sul portale puulp.it.
+Rispondi SOLO con JSON valido:
+{
+  "ogTitle": "Titolo accattivante per OpenGraph (max 65 caratteri)",
+  "ogDescription": "Descrizione persuasiva per l'anteprima social (110-150 caratteri)",
+  "twitterPost": "Tweet incisivo con emoji, hook iniziale, invito a leggere su puulp.it e hashtag (max 240 caratteri)",
+  "linkedInPost": "Post professionale con 2-3 bullet point dei temi chiave e invito alla lettura su puulp.it",
+  "whatsAppMessage": "Messaggio formattato per WhatsApp con *grassetti*, emoji e invito a leggere su puulp.it",
+  "telegramMessage": "Post formattato per Telegram con *grassetti* ed emoji",
+  "hashtags": ["#puulp", "#News", "#Innovazione", "#RassegnaStampa"],
+  "callToAction": "Leggi l'approfondimento completo su puulp.it"
+}`;
+
+      let socialShare: any = null;
+
+      if (!isLocalhostEndpoint || process.env.OLLAMA_HOST) {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 1800);
+          const ollamaRes = await fetch(`${endpoint}/api/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            signal: controller.signal,
+            body: JSON.stringify({
+              model,
+              messages: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: `Titolo: ${cleanTitle}\nEstratto: ${cleanDesc}\nCanale: ${cleanSource}` },
+              ],
+              stream: false,
+              format: 'json',
+              options: { temperature: 0.35 },
+            }),
+          });
+          clearTimeout(timeoutId);
+          if (ollamaRes.ok) {
+            const data = await ollamaRes.json();
+            const raw = data?.message?.content;
+            if (raw) {
+              try {
+                socialShare = JSON.parse(raw);
+              } catch {
+                const m = raw.match(/\{[\s\S]*\}/);
+                if (m) socialShare = JSON.parse(m[0]);
+              }
+            }
+          }
+        } catch {}
+      }
+
+      if (!socialShare && genAI) {
+        try {
+          const geminiPromise = genAI.models.generateContent({
+            model: 'gemini-3.8-flash',
+            contents: `${systemPrompt}\n\nTitolo: ${cleanTitle}\nEstratto: ${cleanDesc}\nCanale: ${cleanSource}`,
+            config: { responseMimeType: 'application/json', temperature: 0.35 },
+          });
+          const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2500));
+          const geminiRes: any = await Promise.race([geminiPromise, timeoutPromise]);
+          const txt = geminiRes?.text || '';
+          if (txt) {
+            try {
+              socialShare = JSON.parse(txt);
+            } catch {
+              const m = txt.match(/\{[\s\S]*\}/);
+              if (m) socialShare = JSON.parse(m[0]);
+            }
+          }
+        } catch {}
+      }
+
+      if (!socialShare || !socialShare.twitterPost) {
+        const words = cleanTitle
+          .replace(/[^a-zA-Z0-9àèéìòù\s]/g, '')
+          .split(/\s+/)
+          .filter((w) => w.length > 4)
+          .slice(0, 2)
+          .map((w) => `#${w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()}`);
+        const tags = Array.from(new Set([...words, '#puulp', '#News', '#RassegnaStampa']));
+
+        socialShare = {
+          ogTitle: `${cleanTitle.slice(0, 55)} — puulp.it`,
+          ogDescription: cleanDesc
+            ? `${cleanDesc.slice(0, 130)}... Leggi su puulp.it.`
+            : `Leggi l'articolo completo "${cleanTitle}" e tutti gli aggiornamenti in tempo reale su puulp.it.`,
+          twitterPost: `🔥 ${cleanTitle.slice(0, 150)}\n\n📖 Leggi l'approfondimento completo sul sito puulp.it 👇\n${tags.join(' ')}`,
+          linkedInPost: `📢 Segnalazione da puulp.it (${cleanSource}):\n\n"${cleanTitle}"\n\n${
+            cleanDesc ? `📌 In sintesi: ${cleanDesc.slice(0, 220)}\n\n` : ''
+          }👉 Leggi l'articolo completo e consulta tutte le fonti aggiornate sul nostro portale:\n${tags.join(' ')}`,
+          whatsAppMessage: `📰 *${cleanTitle}*\n\n${
+            cleanDesc ? `${cleanDesc.slice(0, 160)}...\n\n` : ''
+          }👉 *Leggi l'articolo sul sito puulp.it:*`,
+          telegramMessage: `⚡ *${cleanTitle}*\n\n${
+            cleanDesc ? `${cleanDesc.slice(0, 160)}...\n\n` : ''
+          }🔗 *Apri su puulp.it:*`,
+          hashtags: tags,
+          callToAction: 'Leggi ora su puulp.it',
+        };
+      }
+
+      return res.json({ ok: true, socialShare });
+    } catch {
+      return res.json({ ok: false });
+    }
+  });
+
   // Google AdSense ads.txt verification endpoint
   app.get('/ads.txt', (_req: Request, res: Response) => {
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');

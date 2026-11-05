@@ -307,11 +307,14 @@ export function ManualArticleModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-background/80 backdrop-blur-sm animate-in fade-in"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-5 bg-background/80 backdrop-blur-sm animate-in fade-in"
       role="dialog"
       aria-modal="true"
     >
-      <div className="relative w-full max-w-4xl max-h-[92vh] flex flex-col border-3 border-border bg-card shadow-[8px_8px_0_0_var(--foreground)] overflow-hidden">
+      <div className="relative w-full max-w-4xl max-h-[94dvh] sm:max-h-[92vh] flex flex-col border-t-3 sm:border-3 border-border bg-card rounded-t-2xl sm:rounded-none shadow-[0_-8px_30px_rgba(0,0,0,0.35)] sm:shadow-[8px_8px_0_0_var(--foreground)] overflow-hidden">
+        <div className="sm:hidden flex justify-center pt-2 pb-1 bg-muted/40">
+          <div className="w-10 h-1.5 rounded-full bg-border" />
+        </div>
         {/* Header */}
         <div className="bg-muted/40 border-b-2 border-border p-3 sm:p-4 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2">
@@ -328,7 +331,7 @@ export function ManualArticleModal({
           <button
             type="button"
             onClick={onClose}
-            className="w-8 h-8 flex items-center justify-center border-2 border-border bg-card text-foreground font-bold hover:bg-destructive hover:text-destructive-foreground transition-colors cursor-pointer text-sm"
+            className="w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center border-2 border-border bg-card text-foreground font-bold hover:bg-destructive hover:text-destructive-foreground transition-colors cursor-pointer text-sm"
             aria-label="Chiudi"
           >
             ✕

@@ -442,13 +442,16 @@ export function AffiliateCategoryScraperModal({
           onClose();
         }
       }}
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/60 backdrop-blur-sm overflow-y-auto"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-5 bg-black/60 backdrop-blur-sm overflow-y-auto"
     >
-      <div className="relative w-full max-w-4xl bg-white rounded-2xl shadow-2xl border border-neutral-200 overflow-hidden my-auto max-h-[92vh] flex flex-col">
+      <div className="relative w-full max-w-4xl bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl border border-neutral-200 overflow-hidden sm:my-auto max-h-[94dvh] sm:max-h-[92vh] flex flex-col">
+        <div className="sm:hidden flex justify-center pt-2 pb-1 bg-amber-500/5">
+          <div className="w-10 h-1.5 rounded-full bg-neutral-300" />
+        </div>
         {/* Header */}
-        <div className="flex items-center justify-between px-5 sm:px-6 py-4 border-b border-neutral-100 bg-gradient-to-r from-amber-500/10 via-orange-500/10 to-transparent">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center shadow-md shadow-amber-500/20">
+        <div className="flex items-center justify-between px-4 sm:px-6 py-3.5 sm:py-4 border-b border-neutral-100 bg-gradient-to-r from-amber-500/10 via-orange-500/10 to-transparent">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center shadow-md shadow-amber-500/20 shrink-0">
               <Coins className="w-5 h-5" />
             </div>
             <div>

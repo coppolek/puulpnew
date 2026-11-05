@@ -44,6 +44,13 @@ import { ManualArticleModal } from './components/ManualArticleModal.tsx';
 import { ArticleDetailModal, ArticleDetailItem } from './components/ArticleDetailModal.tsx';
 import { OllamaAdminModal } from './components/OllamaAdminModal.tsx';
 import { TrendAnalyticsDashboard } from './components/TrendAnalyticsDashboard.tsx';
+import {
+  buildSiteArticleUrl,
+  buildSitePageUrl,
+  ensureInternalSiteUrl,
+  getArticleSiteSlug,
+  matchesArticleParam,
+} from './lib/shareUtils.ts';
 
 const isAffiliateLink = (link: string): boolean => {
   if (!link) return false;
@@ -208,6 +215,7 @@ export default function App() {
   const [showManualArticleModal, setShowManualArticleModal] = useState<boolean>(false);
   const [articleToEdit, setArticleToEdit] = useState<ManualArticle | null>(null);
   const [readingArticle, setReadingArticle] = useState<ArticleDetailItem | null>(null);
+  const deepLinkResolvedRef = useRef<string | null>(null);
 
   // Timeline Pagination, Archive Navigation & Sorting state
   const [sortOrder, setSortOrder] = useState<'newest' | 'oldest'>('newest');
@@ -462,16 +470,74 @@ export default function App() {
 
   function handleCopyPageLink() {
     if (!activePage) return;
-    const directUrl = `${window.location.origin}/?p=${encodeURIComponent(activePage.slug || activePage.id)}`;
+    const directUrl = buildSitePageUrl(activePage.slug || activePage.id);
     navigator.clipboard.writeText(directUrl);
     setPageCopiedLink(true);
     setTimeout(() => setPageCopiedLink(false), 2000);
   }
 
   function handleOpenShare(data: ShareData) {
-    setShareModalData(data);
+    const fallbackPage = data.pageSlug || activePage?.slug || activePage?.id;
+    const internalUrl = ensureInternalSiteUrl(data.url, {
+      title: data.title,
+      pageSlugOrId: fallbackPage,
+      articleSlug: data.articleSlug,
+    });
+    setShareModalData({
+      ...data,
+      url: internalUrl,
+      pageSlug: fallbackPage,
+    });
     setIsShareModalOpen(true);
   }
+
+  // Deep-link resolution for shared article URLs (?art=<slug>) across BOTH manual articles and RSS feed items
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const urlParams = new URLSearchParams(window.location.search);
+    const targetArt = urlParams.get('art') || urlParams.get('article');
+    if (!targetArt || deepLinkResolvedRef.current === targetArt) return;
+
+    // 1. Check manual editorial articles first
+    const matchedManual = manualArticles.find((a) => matchesArticleParam(targetArt, a));
+    if (matchedManual) {
+      deepLinkResolvedRef.current = targetArt;
+      setReadingArticle(matchedManual);
+      if (matchedManual.pageId && pages.some((p) => p.id === matchedManual.pageId)) {
+        setActivePageId(matchedManual.pageId);
+      }
+      return;
+    }
+
+    // 2. Check all saved RSS feed items so shared feed articles open inside puulp.it popup reader
+    for (const feed of savedFeeds) {
+      const matchedItem = (feed.items || []).find((item) => matchesArticleParam(targetArt, item));
+      if (matchedItem) {
+        deepLinkResolvedRef.current = targetArt;
+        const feedPage = pages.find(
+          (p) => (p.feedIds && p.feedIds.includes(feed.id)) || feed.pageId === p.id
+        );
+        if (feedPage && !urlParams.get('p')) {
+          setActivePageId(feedPage.id);
+        }
+        setReadingArticle({
+          title: matchedItem.title,
+          link: matchedItem.link,
+          image: matchedItem.image,
+          description: matchedItem.description,
+          date: matchedItem.date,
+          createdAt: matchedItem.date || new Date().toISOString(),
+          feedTitle: feed.title,
+          category: feedPage?.category || feedPage?.title || 'Articolo',
+          price: (matchedItem as { price?: string }).price,
+          isManual: false,
+          pageId: feedPage?.slug || feedPage?.id,
+          slug: getArticleSiteSlug(matchedItem),
+        });
+        return;
+      }
+    }
+  }, [manualArticles, savedFeeds, pages]);
 
   // All articles across current scope (both manual editorial articles & feed items)
   const scopedArticles = useMemo(() => {
@@ -566,7 +632,23 @@ export default function App() {
       category: activePage?.category || activePage?.title || 'Articolo',
       price: item.price,
       isManual: false,
+      pageId: activePage?.slug || activePage?.id,
+      slug: getArticleSiteSlug(item),
     });
+  }
+
+  function handleCloseArticleModal() {
+    setReadingArticle(null);
+    try {
+      const currentUrl = new URL(window.location.href);
+      if (currentUrl.searchParams.has('art') || currentUrl.searchParams.has('article')) {
+        currentUrl.searchParams.delete('art');
+        currentUrl.searchParams.delete('article');
+        window.history.replaceState({}, '', currentUrl.toString());
+      }
+    } catch {
+      // ignore
+    }
   }
 
   // Filtered articles based on search query ("Cerca") and source chip
@@ -1013,7 +1095,7 @@ export default function App() {
     <main className="min-h-screen bg-background text-foreground flex flex-col" style={fontMono}>
       {/* Real-time In-App Toast Alert */}
       {activeToast && (
-        <div className="fixed bottom-6 right-6 z-50 max-w-sm border-3 border-border bg-card p-4 shadow-[6px_6px_0_0_var(--foreground)] animate-bounce-short">
+        <div className="fixed bottom-16 sm:bottom-6 inset-x-3 sm:inset-x-auto sm:right-6 z-50 sm:max-w-sm border-3 border-border bg-card p-3.5 sm:p-4 shadow-[5px_5px_0_0_var(--foreground)] animate-bounce-short">
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-2">
               <span className="text-xl">🔔</span>
@@ -1024,7 +1106,7 @@ export default function App() {
             <button
               type="button"
               onClick={() => setActiveToast(null)}
-              className="text-xs font-bold hover:text-primary cursor-pointer"
+              className="w-8 h-8 flex items-center justify-center text-xs font-bold hover:text-primary cursor-pointer"
             >
               ✕
             </button>
@@ -1033,7 +1115,7 @@ export default function App() {
             {activeToast.title}
           </p>
           <div className="mt-2 flex items-center justify-between text-xs">
-            <span className="text-muted-foreground">{activeToast.feedTitle}</span>
+            <span className="text-muted-foreground truncate max-w-[180px]">{activeToast.feedTitle}</span>
             <button
               type="button"
               onClick={() => {
@@ -1046,9 +1128,9 @@ export default function App() {
                 });
                 setActiveToast(null);
               }}
-              className="font-bold underline text-foreground hover:text-primary cursor-pointer"
+              className="font-bold underline text-foreground hover:text-primary cursor-pointer min-h-[36px] flex items-center"
             >
-              Leggi in popup →
+              Leggi nel Sito →
             </button>
           </div>
         </div>
@@ -1282,12 +1364,12 @@ export default function App() {
             <button
               type="button"
               onClick={() => setShowAnalyticsDashboard(true)}
-              className="border-2 border-border bg-background hover:bg-muted px-2.5 py-1.5 min-h-[38px] text-xs font-semibold uppercase transition-colors cursor-pointer flex items-center gap-1.5 shadow-[2px_2px_0_0_var(--foreground)] active:translate-x-0.5 active:translate-y-0.5"
+              className="border-2 border-border bg-background hover:bg-muted px-2.5 py-1.5 min-h-[40px] text-xs font-semibold uppercase transition-colors cursor-pointer flex items-center gap-1.5 shadow-[2px_2px_0_0_var(--foreground)] active:translate-x-0.5 active:translate-y-0.5"
               title="Visualizza grafici e analisi sui trend tematici delle ultime 24 ore"
             >
               <span>📊</span>
               <span className="hidden md:inline">Trend 24h</span>
-              <span className="md:hidden">Trend</span>
+              <span className="hidden xs:inline md:hidden">Trend</span>
             </button>
 
             {/* Real-time Notifications Bell */}
@@ -1297,7 +1379,7 @@ export default function App() {
                 setShowNotifModal(true);
                 setUnreadNotifCount(0);
               }}
-              className="relative border-2 border-border bg-background px-2.5 py-1.5 min-h-[38px] text-xs font-semibold uppercase hover:bg-muted transition-colors cursor-pointer flex items-center gap-1.5"
+              className="relative border-2 border-border bg-background px-2.5 py-1.5 min-h-[40px] text-xs font-semibold uppercase hover:bg-muted transition-colors cursor-pointer flex items-center gap-1.5"
               title="Notifiche in tempo reale per nuovi articoli"
             >
               <span>🔔</span>
@@ -1314,41 +1396,41 @@ export default function App() {
             {/* Admin Login / Status Trigger */}
             {isAdmin ? (
               <div className="flex items-center gap-1.5 sm:gap-2">
+                {/* Desktop Admin Quick Buttons */}
                 <button
                   type="button"
                   onClick={() => {
                     setArticleToEdit(null);
                     setShowManualArticleModal(true);
                   }}
-                  className="border-2 border-border bg-primary text-primary-foreground hover:opacity-90 px-2 sm:px-2.5 py-1.5 min-h-[38px] text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer flex items-center gap-1 shadow-[2px_2px_0_0_var(--foreground)] active:translate-x-0.5 active:translate-y-0.5"
+                  className="hidden sm:flex border-2 border-border bg-primary text-primary-foreground hover:opacity-90 px-2.5 py-1.5 min-h-[40px] text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer items-center gap-1 shadow-[2px_2px_0_0_var(--foreground)] active:translate-x-0.5 active:translate-y-0.5"
                   title="Inserisci manualmente un articolo in una categoria con ottimizzazione SEO"
                 >
                   <span>✍️</span>
-                  <span className="hidden sm:inline">+ Nuovo Articolo</span>
-                  <span className="sm:hidden">+ Articolo</span>
+                  <span>+ Nuovo Articolo</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setShowAffiliateModal(true)}
-                  className="border-2 border-amber-500 bg-amber-50 hover:bg-amber-100 text-amber-900 px-2 sm:px-2.5 py-1.5 min-h-[38px] text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer flex items-center gap-1 shadow-[2px_2px_0_0_#d97706]"
+                  className="hidden lg:flex border-2 border-amber-500 bg-amber-50 hover:bg-amber-100 text-amber-900 px-2.5 py-1.5 min-h-[40px] text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer items-center gap-1 shadow-[2px_2px_0_0_#d97706]"
                   title="Scraping di intere categorie e relative sottocategorie con link affiliato per monetizzare"
                 >
                   <span className="text-amber-600 font-bold">💰</span>
-                  <span className="hidden sm:inline">Monetizza Categorie</span>
+                  <span>Monetizza Categorie</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setShowOllamaModal(true)}
-                  className="border-2 border-foreground bg-foreground text-background hover:opacity-90 px-2 sm:px-2.5 py-1.5 min-h-[38px] text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer flex items-center gap-1.5 shadow-[2px_2px_0_0_var(--primary)] active:translate-x-0.5 active:translate-y-0.5"
+                  className="hidden sm:flex border-2 border-foreground bg-foreground text-background hover:opacity-90 px-2.5 py-1.5 min-h-[40px] text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer items-center gap-1.5 shadow-[2px_2px_0_0_var(--primary)] active:translate-x-0.5 active:translate-y-0.5"
                   title="Collega Ollama come amministratore per gestire intere pagine da prompt"
                 >
                   <span className="text-sm">🤖</span>
-                  <span className="hidden sm:inline">Ollama AI</span>
+                  <span>Ollama AI</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setAdminMode(!adminMode)}
-                  className={`border-2 border-border px-2.5 sm:px-3 py-1.5 min-h-[38px] text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer ${
+                  className={`border-2 border-border px-2.5 sm:px-3 py-1.5 min-h-[40px] text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer ${
                     adminMode
                       ? 'bg-primary text-primary-foreground shadow-[2px_2px_0_0_var(--foreground)]'
                       : 'bg-card hover:bg-muted text-foreground'
@@ -1360,7 +1442,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={handleLogout}
-                  className="border border-border/60 bg-background px-2 py-1.5 min-h-[38px] text-[11px] uppercase hover:bg-destructive hover:text-white transition-colors cursor-pointer hidden sm:block"
+                  className="border border-border/60 bg-background px-2 py-1.5 min-h-[40px] text-[11px] uppercase hover:bg-destructive hover:text-white transition-colors cursor-pointer hidden md:block"
                   title="Disconnetti account amministratore"
                 >
                   Esci
@@ -1370,7 +1452,7 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setShowLoginModal(true)}
-                className="border border-border/80 bg-background px-2.5 py-1.5 min-h-[38px] text-xs font-medium uppercase text-muted-foreground hover:text-foreground hover:border-border transition-colors cursor-pointer flex items-center gap-1"
+                className="border border-border/80 bg-background px-2.5 py-1.5 min-h-[40px] text-xs font-medium uppercase text-muted-foreground hover:text-foreground hover:border-border transition-colors cursor-pointer flex items-center gap-1"
                 title="Accedi come amministratore per gestire pagine e feed"
               >
                 <span>🔒</span>
@@ -1379,6 +1461,53 @@ export default function App() {
             )}
           </div>
         </div>
+
+        {/* Mobile Admin Quick-Action Strip: horizontally scrollable so mobile header stays uncluttered */}
+        {isAdmin && (
+          <div className="sm:hidden mt-2 pt-2 border-t border-border/50 flex items-center gap-2 overflow-x-auto no-scrollbar -mx-3 px-3">
+            <button
+              type="button"
+              onClick={() => {
+                setArticleToEdit(null);
+                setShowManualArticleModal(true);
+              }}
+              className="shrink-0 border-2 border-border bg-primary text-primary-foreground px-3 py-1.5 min-h-[38px] text-[11px] font-bold uppercase tracking-wider flex items-center gap-1.5 shadow-[2px_2px_0_0_var(--foreground)] cursor-pointer"
+            >
+              <span>✍️</span>
+              <span>+ Articolo SEO</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowOllamaModal(true)}
+              className="shrink-0 border-2 border-foreground bg-foreground text-background px-3 py-1.5 min-h-[38px] text-[11px] font-bold uppercase tracking-wider flex items-center gap-1.5 shadow-[2px_2px_0_0_var(--primary)] cursor-pointer"
+            >
+              <span>🤖</span>
+              <span>Ollama AI Admin</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowAffiliateModal(true)}
+              className="shrink-0 border-2 border-amber-500 bg-amber-50 text-amber-900 px-3 py-1.5 min-h-[38px] text-[11px] font-bold uppercase tracking-wider flex items-center gap-1.5 shadow-[2px_2px_0_0_#d97706] cursor-pointer"
+            >
+              <span>💰</span>
+              <span>Monetizza</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowNewPageModal(true)}
+              className="shrink-0 border-2 border-border bg-card text-foreground px-3 py-1.5 min-h-[38px] text-[11px] font-bold uppercase tracking-wider flex items-center gap-1 cursor-pointer"
+            >
+              <span>+ Pagina</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="shrink-0 border border-border/60 bg-background px-2.5 py-1.5 min-h-[38px] text-[11px] uppercase text-muted-foreground hover:text-destructive cursor-pointer"
+            >
+              Esci
+            </button>
+          </div>
+        )}
       </header>
 
       {/* Admin Info Bar: visible only when Redazione is activated by logged in editor */}
@@ -1454,28 +1583,15 @@ export default function App() {
               </h1>
 
               {/* Quick Actions (Copia Link Categoria + Scrivi Articolo + Condividi + Notifiche + RSS) */}
-              <div className="flex items-center gap-2 shrink-0 flex-wrap">
+              <div className="grid grid-cols-2 sm:flex sm:items-center gap-2 shrink-0 sm:flex-wrap w-full md:w-auto">
                 <button
                   type="button"
                   onClick={handleCopyPageLink}
-                  className="border-2 border-border bg-card px-2.5 sm:px-3 py-1.5 min-h-[38px] text-xs uppercase font-medium hover:bg-accent transition-colors cursor-pointer flex items-center gap-1.5 shadow-[2px_2px_0_0_var(--foreground)] active:translate-x-0.5 active:translate-y-0.5"
-                  title="Copia link diretto di questa categoria / pagina"
+                  className="border-2 border-border bg-card px-2.5 sm:px-3 py-2 sm:py-1.5 min-h-[42px] sm:min-h-[38px] text-xs uppercase font-bold hover:bg-accent transition-colors cursor-pointer flex items-center justify-center gap-1.5 shadow-[2px_2px_0_0_var(--foreground)] active:translate-x-0.5 active:translate-y-0.5"
+                  title="Copia link diretto di questa categoria / pagina su puulp.it"
                 >
                   <span className="text-primary font-bold">{pageCopiedLink ? '✓' : '🔗'}</span>
-                  <span>{pageCopiedLink ? 'Link Copiato!' : 'Copia Link Categoria'}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setArticleToEdit(null);
-                    setShowManualArticleModal(true);
-                  }}
-                  className="border-2 border-border bg-card hover:bg-primary hover:text-primary-foreground px-2.5 sm:px-3 py-1.5 min-h-[38px] text-xs uppercase font-medium transition-colors cursor-pointer flex items-center gap-1.5 shadow-[2px_2px_0_0_var(--foreground)] active:translate-x-0.5 active:translate-y-0.5"
-                  title="Inserisci manualmente un articolo in questa categoria con ottimizzazione SEO"
-                >
-                  <span className="text-primary font-bold">✍️</span>
-                  <span>+ Scrivi Articolo</span>
+                  <span className="truncate">{pageCopiedLink ? 'Link Copiato!' : 'Link Categoria'}</span>
                 </button>
 
                 <button
@@ -1484,46 +1600,59 @@ export default function App() {
                     handleOpenShare({
                       title: activePage.socialShare?.ogTitle || `${activePage.title} — puulp.it`,
                       text: activePage.socialShare?.ogDescription || `Scopri la rassegna e i feed di "${activePage.title}" su puulp.it:`,
-                      url: window.location.href,
+                      url: buildSitePageUrl(activePage.slug || activePage.id),
                       source: activePage.category || 'puulp.it',
                       socialShare: activePage.socialShare,
+                      pageSlug: activePage.slug || activePage.id,
                     })
                   }
-                  className="border-2 border-border bg-card px-2.5 sm:px-3 py-1.5 min-h-[38px] text-xs uppercase font-medium hover:bg-accent transition-colors cursor-pointer flex items-center gap-1.5 shadow-[2px_2px_0_0_var(--foreground)] active:translate-x-0.5 active:translate-y-0.5"
-                  title="Condividi questa pagina sui social con copy elaborato da Ollama"
+                  className="border-2 border-border bg-primary text-primary-foreground px-2.5 sm:px-3 py-2 sm:py-1.5 min-h-[42px] sm:min-h-[38px] text-xs uppercase font-bold hover:opacity-95 transition-colors cursor-pointer flex items-center justify-center gap-1.5 shadow-[2px_2px_0_0_var(--foreground)] active:translate-x-0.5 active:translate-y-0.5"
+                  title="Condividi questa pagina del sito sui social con copy elaborato da Ollama"
                 >
-                  <span className="text-primary font-bold">📤</span>
-                  <span>Condividi</span>
+                  <span>📤</span>
+                  <span className="truncate">Condividi Pagina</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setArticleToEdit(null);
+                    setShowManualArticleModal(true);
+                  }}
+                  className="border-2 border-border bg-card hover:bg-primary hover:text-primary-foreground px-2.5 sm:px-3 py-2 sm:py-1.5 min-h-[42px] sm:min-h-[38px] text-xs uppercase font-medium transition-colors cursor-pointer flex items-center justify-center gap-1.5 shadow-[2px_2px_0_0_var(--foreground)] active:translate-x-0.5 active:translate-y-0.5"
+                  title="Inserisci manualmente un articolo in questa categoria con ottimizzazione SEO"
+                >
+                  <span className="text-primary font-bold">✍️</span>
+                  <span className="truncate">+ Scrivi Articolo</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setShowAnalyticsDashboard(true)}
-                  className="border-2 border-border bg-card px-2.5 sm:px-3 py-1.5 min-h-[38px] text-xs uppercase font-medium hover:bg-accent transition-colors cursor-pointer flex items-center gap-1.5 shadow-[2px_2px_0_0_var(--foreground)] active:translate-x-0.5 active:translate-y-0.5"
+                  className="border-2 border-border bg-card px-2.5 sm:px-3 py-2 sm:py-1.5 min-h-[42px] sm:min-h-[38px] text-xs uppercase font-medium hover:bg-accent transition-colors cursor-pointer flex items-center justify-center gap-1.5 shadow-[2px_2px_0_0_var(--foreground)] active:translate-x-0.5 active:translate-y-0.5"
                   title="Grafici e trend tematici delle ultime 24 ore"
                 >
                   <span className="text-primary font-bold">📊</span>
-                  <span>Trend 24h</span>
+                  <span className="truncate">Trend 24h</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setShowNotifModal(true)}
-                  className="border-2 border-border bg-card px-2.5 sm:px-3 py-1.5 min-h-[38px] text-xs uppercase font-medium hover:bg-accent transition-colors cursor-pointer flex items-center gap-1.5 shadow-[2px_2px_0_0_var(--foreground)] active:translate-x-0.5 active:translate-y-0.5"
+                  className="border-2 border-border bg-card px-2.5 sm:px-3 py-2 sm:py-1.5 min-h-[42px] sm:min-h-[38px] text-xs uppercase font-medium hover:bg-accent transition-colors cursor-pointer flex items-center justify-center gap-1.5 shadow-[2px_2px_0_0_var(--foreground)] active:translate-x-0.5 active:translate-y-0.5"
                 >
                   <span>🔔</span>
-                  <span className="hidden xs:inline">Notifiche Live</span>
-                  <span className="xs:hidden">Notifiche</span>
+                  <span className="truncate">Notifiche Live</span>
                 </button>
 
                 {pageFeeds.length > 0 && (
                   <button
                     type="button"
                     onClick={handleCopyPageRss}
-                    className="border-2 border-border bg-card px-2.5 sm:px-3 py-1.5 min-h-[38px] text-xs uppercase font-medium hover:bg-accent transition-colors cursor-pointer shadow-[2px_2px_0_0_var(--foreground)] active:translate-x-0.5 active:translate-y-0.5"
+                    className="border-2 border-border bg-card px-2.5 sm:px-3 py-2 sm:py-1.5 min-h-[42px] sm:min-h-[38px] text-xs uppercase font-medium hover:bg-accent transition-colors cursor-pointer flex items-center justify-center shadow-[2px_2px_0_0_var(--foreground)] active:translate-x-0.5 active:translate-y-0.5"
                     title="Copia link RSS unificato di questa pagina"
                   >
-                    {pageCopiedRss ? '✓ Copiato!' : 'Feed RSS'}
+                    {pageCopiedRss ? '✓ Copiato!' : '📡 Feed RSS'}
                   </button>
                 )}
               </div>
@@ -1750,6 +1879,16 @@ export default function App() {
             <ol className="divide-y divide-border/30">
               {paginatedArticles.map((item, idx) => {
                 const globalIdx = pageSize === 'all' ? idx : (validCurrentPage - 1) * pageSize + idx;
+                const siteArticleUrl = buildSiteArticleUrl(
+                  {
+                    title: item.title,
+                    link: item.link,
+                    slug: item.rawArticle?.slug,
+                    id: item.rawArticle?.id,
+                    pageId: item.rawArticle?.pageId || activePage?.slug || activePage?.id,
+                  },
+                  activePage?.slug || activePage?.id
+                );
                 return (
                   <React.Fragment key={item.link + idx}>
                     <li className="py-4 sm:py-5 hover:bg-muted/10 transition-colors">
@@ -1762,206 +1901,206 @@ export default function App() {
                           >
                             {String(globalIdx + 1).padStart(2, '0')}
                           </span>
-                        <span className="font-bold text-foreground uppercase tracking-wider text-[11px] truncate flex items-center gap-1.5">
-                          {item.feedTitle}
-                          {item.isManual && (
-                            <span className="bg-primary/10 text-primary border border-primary/30 text-[9px] uppercase font-bold px-1.5 py-0.2 rounded select-none">
-                              SEO Ottimizzato
-                            </span>
+                          <span className="font-bold text-foreground uppercase tracking-wider text-[11px] truncate flex items-center gap-1.5">
+                            {item.feedTitle}
+                            {item.isManual && (
+                              <span className="bg-primary/10 text-primary border border-primary/30 text-[9px] uppercase font-bold px-1.5 py-0.2 rounded select-none">
+                                SEO Ottimizzato
+                              </span>
+                            )}
+                          </span>
+                          {item.date && (
+                            <>
+                              <span className="text-muted-foreground/60 hidden xs:inline">·</span>
+                              <span className="shrink-0 text-[11px] hidden xs:inline">{item.date}</span>
+                            </>
                           )}
-                        </span>
-                        {item.date && (
-                          <>
-                            <span className="text-muted-foreground/60 hidden xs:inline">·</span>
-                            <span className="shrink-0 text-[11px] hidden xs:inline">{item.date}</span>
-                          </>
-                        )}
-                      </div>
-
-                      {/* Quick Article Share Button */}
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          handleOpenShare({
-                            title: item.title,
-                            text: item.description || `Leggi questo articolo da ${item.feedTitle} su puulp.it:`,
-                            url: item.link,
-                            image: item.image,
-                            source: item.feedTitle,
-                          });
-                        }}
-                        className="flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground hover:text-primary transition-colors cursor-pointer px-2.5 py-1 min-h-[34px] border border-border/70 hover:border-primary/60 bg-card shrink-0 shadow-[1px_1px_0_0_var(--foreground)] active:translate-x-0.5 active:translate-y-0.5"
-                        title="Condividi articolo sui social (WhatsApp, Telegram, X, ecc.)"
-                      >
-                        <svg className="w-3.5 h-3.5 fill-current text-primary" viewBox="0 0 24 24">
-                          <path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92 1.61 0 2.92-1.31 2.92-2.92s-1.31-2.92-2.92-2.92z"/>
-                        </svg>
-                        <span>Condividi</span>
-                      </button>
-                    </div>
-
-                    {/* Responsive Article Card Body: stacks neatly on mobile */}
-                    <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 items-start">
-                      {/* Article Image (if available) */}
-                      {item.image && (
-                        <div
-                          onClick={() => handleOpenArticle(item)}
-                          className="w-full sm:w-36 sm:h-24 shrink-0 block overflow-hidden border-2 border-border bg-muted group cursor-pointer"
-                          title="Clicca per aprire l'articolo in popup"
-                        >
-                          <img
-                            src={item.image}
-                            alt={item.title}
-                            loading="lazy"
-                            onError={(e) => {
-                              const target = e.currentTarget;
-                              if (!target.dataset.triedFallback) {
-                                target.dataset.triedFallback = 'true';
-                                target.src = 'https://images.unsplash.com/photo-1526738549149-8e07eca6c147?w=400&auto=format&fit=crop&q=80';
-                              } else if (target.parentElement) {
-                                target.parentElement.style.display = 'none';
-                              }
-                            }}
-                            className="w-full h-44 sm:h-24 object-cover group-hover:scale-105 transition-transform duration-300"
-                          />
                         </div>
-                      )}
 
-                      {/* Content */}
-                      <div className="min-w-0 flex-1 w-full">
+                        {/* Quick Article Share Button (Always shares internal puulp.it URL) */}
                         <button
                           type="button"
-                          onClick={() => handleOpenArticle(item)}
-                          className="text-left text-lg sm:text-xl font-extrabold hover:text-primary transition-colors leading-snug block cursor-pointer w-full"
-                          style={fontFraunces}
-                          title="Clicca per aprire l'articolo in popup"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            handleOpenShare({
+                              title: item.rawArticle?.socialShare?.ogTitle || item.title,
+                              text:
+                                item.rawArticle?.socialShare?.ogDescription ||
+                                item.description ||
+                                `Leggi questo articolo su puulp.it:`,
+                              url: siteArticleUrl,
+                              image: item.image,
+                              source: item.feedTitle,
+                              socialShare: item.rawArticle?.socialShare,
+                              pageSlug: activePage?.slug || activePage?.id,
+                              articleSlug: getArticleSiteSlug(item),
+                            });
+                          }}
+                          className="flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground hover:text-primary transition-colors cursor-pointer px-2.5 py-1.5 min-h-[38px] border border-border/70 hover:border-primary/60 bg-card shrink-0 shadow-[1px_1px_0_0_var(--foreground)] active:translate-x-0.5 active:translate-y-0.5"
+                          title="Condividi il link diretto all'articolo sul sito puulp.it"
                         >
-                          {item.title}
+                          <svg className="w-3.5 h-3.5 fill-current text-primary" viewBox="0 0 24 24">
+                            <path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92 1.61 0 2.92-1.31 2.92-2.92s-1.31-2.92-2.92-2.92z"/>
+                          </svg>
+                          <span>Condividi</span>
                         </button>
+                      </div>
 
-                        {item.description && (
-                          <p
+                      {/* Responsive Article Card Body: stacks neatly on mobile */}
+                      <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 items-start">
+                        {/* Article Image (if available) */}
+                        {item.image && (
+                          <div
                             onClick={() => handleOpenArticle(item)}
-                            className="mt-1.5 text-xs text-muted-foreground line-clamp-3 leading-relaxed cursor-pointer hover:text-foreground transition-colors"
-                            title="Clicca per leggere l'articolo in popup"
+                            className="w-full sm:w-36 sm:h-24 shrink-0 block overflow-hidden border-2 border-border bg-muted group cursor-pointer"
+                            title="Clicca per aprire l'articolo nel sito in popup"
                           >
-                            {item.description}
-                          </p>
+                            <img
+                              src={item.image}
+                              alt={item.title}
+                              loading="lazy"
+                              onError={(e) => {
+                                const target = e.currentTarget;
+                                if (!target.dataset.triedFallback) {
+                                  target.dataset.triedFallback = 'true';
+                                  target.src = 'https://images.unsplash.com/photo-1526738549149-8e07eca6c147?w=400&auto=format&fit=crop&q=80';
+                                } else if (target.parentElement) {
+                                  target.parentElement.style.display = 'none';
+                                }
+                              }}
+                              className="w-full h-44 sm:h-24 object-cover group-hover:scale-105 transition-transform duration-300"
+                            />
+                          </div>
                         )}
 
-                        {/* Footer Affordances on Article */}
-                        <div className="mt-2.5 flex items-center justify-between gap-3 text-[11px] font-mono">
-                          <div className="flex items-center gap-2.5 flex-wrap">
-                            <button
-                              type="button"
+                        {/* Content */}
+                        <div className="min-w-0 flex-1 w-full">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenArticle(item)}
+                            className="text-left text-lg sm:text-xl font-extrabold hover:text-primary transition-colors leading-snug block cursor-pointer w-full"
+                            style={fontFraunces}
+                            title="Clicca per aprire l'articolo nel sito in popup"
+                          >
+                            {item.title}
+                          </button>
+
+                          {item.description && (
+                            <p
                               onClick={() => handleOpenArticle(item)}
-                              className="font-bold underline text-primary hover:text-foreground transition-colors flex items-center gap-1 py-1 cursor-pointer"
-                              title="Apri articolo all'interno del sito in popup"
+                              className="mt-1.5 text-xs sm:text-[13px] text-muted-foreground line-clamp-3 leading-relaxed cursor-pointer hover:text-foreground transition-colors"
+                              title="Clicca per leggere l'articolo in popup"
                             >
-                              <span>
-                                {item.isManual
-                                  ? '📖 Leggi Articolo'
-                                  : isAffiliateLink(item.link)
-                                  ? '🛍️ Scheda Offerta'
-                                  : '📖 Leggi Notizia'}
-                              </span>
-                            </button>
+                              {item.description}
+                            </p>
+                          )}
 
-                            {item.link && (
-                              <a
-                                href={item.link}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="text-muted-foreground/70 hover:text-foreground text-[10px] flex items-center gap-0.5 py-1 underline"
-                                title="Apri direttamente la fonte originale in una nuova scheda"
+                          {/* Footer Affordances on Article (Mobile Thumb-Friendly Action Row) */}
+                          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <button
+                                type="button"
+                                onClick={() => handleOpenArticle(item)}
+                                className="font-bold border border-primary/50 bg-primary/10 text-primary hover:bg-primary hover:text-primary-foreground transition-colors flex items-center gap-1 px-2.5 py-1.5 min-h-[38px] cursor-pointer"
+                                title="Apri articolo all'interno del sito in popup"
                               >
-                                <span>(Fonte esterna ↗)</span>
-                              </a>
-                            )}
+                                <span>
+                                  {item.isManual
+                                    ? '📖 Leggi Articolo'
+                                    : isAffiliateLink(item.link)
+                                    ? '🛍️ Scheda Offerta'
+                                    : '📖 Leggi nel Sito'}
+                                </span>
+                              </button>
 
-                            {isAffiliateLink(item.link) && (
-                              <span className="text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300 px-1.5 py-0.2 rounded">
-                                Partner Link
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleOpenShare({
+                                    title: item.rawArticle?.socialShare?.ogTitle || item.title,
+                                    text:
+                                      item.rawArticle?.socialShare?.ogDescription ||
+                                      item.description ||
+                                      `Leggi "${item.title}" su puulp.it:`,
+                                    url: siteArticleUrl,
+                                    image: item.image,
+                                    source: item.feedTitle,
+                                    socialShare: item.rawArticle?.socialShare,
+                                    pageSlug: activePage?.slug || activePage?.id,
+                                    articleSlug: getArticleSiteSlug(item),
+                                  })
+                                }
+                                className="border border-border/80 bg-card text-foreground hover:border-primary hover:text-primary cursor-pointer transition-colors px-2.5 py-1.5 min-h-[38px] flex items-center gap-1 font-bold"
+                                title="Condividi articolo sui social (porta al sito puulp.it)"
+                              >
+                                <span>📤 Condividi Sito</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(siteArticleUrl);
+                                  setCopiedFeedId(siteArticleUrl);
+                                  setTimeout(() => setCopiedFeedId(null), 2000);
+                                }}
+                                className="border border-border/60 bg-background text-muted-foreground hover:text-foreground cursor-pointer transition-colors px-2.5 py-1.5 min-h-[38px] flex items-center gap-1"
+                                title="Copia il link diretto all'articolo sul sito puulp.it"
+                              >
+                                <span>{copiedFeedId === siteArticleUrl ? '✓ Link Sito Copiato!' : '🔗 Copia Link Sito'}</span>
+                              </button>
+
+                              {isAffiliateLink(item.link) && (
+                                <span className="text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300 px-1.5 py-0.5 rounded">
+                                  Partner Link
+                                </span>
+                              )}
+
+                              {item.price && (
+                                <span className="text-[10px] font-bold bg-amber-50 text-amber-900 border border-amber-200 px-1.5 py-0.5 rounded">
+                                  {item.price}
+                                </span>
+                              )}
+
+                              {/* In admin mode: edit/delete actions for manual articles */}
+                              {isAdmin && adminMode && item.isManual && item.rawArticle && (
+                                <div className="flex items-center gap-2 border-l border-border pl-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setArticleToEdit(item.rawArticle!);
+                                      setShowManualArticleModal(true);
+                                    }}
+                                    className="text-xs text-muted-foreground hover:text-foreground cursor-pointer font-bold min-h-[36px] px-1.5"
+                                    title="Modifica articolo manuale"
+                                  >
+                                    ✎ Modifica
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (confirm('Sei sicuro di voler eliminare questo articolo manuale?')) {
+                                        handleDeleteManualArticle(item.rawArticle!.id);
+                                      }
+                                    }}
+                                    className="text-xs text-destructive hover:underline cursor-pointer font-bold min-h-[36px] px-1.5"
+                                    title="Elimina articolo manuale"
+                                  >
+                                    ✕ Elimina
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+
+                            {item.date && (
+                              <span className="text-muted-foreground xs:hidden text-[10px]">
+                                {item.date}
                               </span>
-                            )}
-
-                            {item.price && (
-                              <span className="text-[10px] font-bold bg-amber-50 text-amber-900 border border-amber-200 px-1.5 py-0.2 rounded">
-                                {item.price}
-                              </span>
-                            )}
-
-                            <button
-                              type="button"
-                              onClick={() => {
-                                navigator.clipboard.writeText(item.link);
-                                setCopiedFeedId(item.link);
-                                setTimeout(() => setCopiedFeedId(null), 2000);
-                              }}
-                              className="text-muted-foreground hover:text-foreground cursor-pointer transition-colors py-1"
-                            >
-                              {copiedFeedId === item.link ? '✓ Copiato!' : 'Copia link'}
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() =>
-                                handleOpenShare({
-                                  title: item.rawArticle?.socialShare?.ogTitle || item.title,
-                                  text: item.rawArticle?.socialShare?.ogDescription || item.description || `Leggi "${item.title}" su puulp.it:`,
-                                  url: item.link,
-                                  image: item.image,
-                                  source: item.feedTitle,
-                                  socialShare: item.rawArticle?.socialShare,
-                                })
-                              }
-                              className="text-muted-foreground hover:text-primary cursor-pointer transition-colors py-1 flex items-center gap-1 font-semibold"
-                              title="Condividi articolo sui social con copy elaborato da Ollama"
-                            >
-                              <span>📤 Condividi</span>
-                            </button>
-
-                            {/* In admin mode: edit/delete actions for manual articles */}
-                            {isAdmin && adminMode && item.isManual && item.rawArticle && (
-                              <div className="flex items-center gap-2 border-l border-border pl-2">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setArticleToEdit(item.rawArticle!);
-                                    setShowManualArticleModal(true);
-                                  }}
-                                  className="text-xs text-muted-foreground hover:text-foreground cursor-pointer font-bold"
-                                  title="Modifica articolo manuale"
-                                >
-                                  ✎ Modifica
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    if (confirm('Sei sicuro di voler eliminare questo articolo manuale?')) {
-                                      handleDeleteManualArticle(item.rawArticle!.id);
-                                    }
-                                  }}
-                                  className="text-xs text-destructive hover:underline cursor-pointer font-bold"
-                                  title="Elimina articolo manuale"
-                                >
-                                  ✕ Elimina
-                                </button>
-                              </div>
                             )}
                           </div>
-
-                          {item.date && (
-                            <span className="text-muted-foreground xs:hidden text-[10px]">
-                              {item.date}
-                            </span>
-                          )}
                         </div>
                       </div>
-                    </div>
-                  </li>
+                    </li>
 
                   {/* Spazio Annunci / Intervallo tra articoli: casualmente Banner AdSense o Invito Notifiche */}
                   {((idx + 1) % 4 === 0 ||
@@ -2292,8 +2431,8 @@ export default function App() {
         </div>
       </footer>
 
-      {/* MOBILE STICKY BOTTOM NAVIGATION BAR (Thumb-friendly native app navigation on mobile) */}
-      <nav className="sm:hidden fixed bottom-0 inset-x-0 bg-card/95 backdrop-blur-md border-t-2 border-border z-40 px-2 py-1 flex items-center justify-around pb-safe shadow-[0_-4px_12px_rgba(0,0,0,0.06)]">
+      {/* MOBILE STICKY BOTTOM NAVIGATION BAR (5-tab thumb-friendly native app navigation on mobile) */}
+      <nav className="sm:hidden fixed bottom-0 inset-x-0 bg-card/95 backdrop-blur-md border-t-2 border-border z-40 px-1 py-1 grid grid-cols-5 items-center pb-safe shadow-[0_-4px_12px_rgba(0,0,0,0.08)]">
         {/* Toggle Pages Dropdown */}
         <button
           type="button"
@@ -2301,24 +2440,35 @@ export default function App() {
             setPageDropdownOpen((prev) => !prev);
             setDropdownSearch('');
           }}
-          className={`flex flex-col items-center justify-center py-1 px-3 min-h-[44px] cursor-pointer rounded-sm transition-colors ${
+          className={`flex flex-col items-center justify-center py-1 px-1 min-h-[46px] cursor-pointer rounded-sm transition-colors ${
             pageDropdownOpen ? 'text-primary font-bold bg-muted/60' : 'text-foreground hover:text-primary'
           }`}
           title="Sfoglia pagine"
         >
           <span className="text-base leading-none">☰</span>
-          <span className="text-[10px] uppercase font-bold tracking-tight mt-0.5">Pagine</span>
+          <span className="text-[10px] uppercase font-bold tracking-tight mt-0.5 truncate">Pagine</span>
         </button>
 
         {/* Scroll & Focus Search */}
         <button
           type="button"
           onClick={handleScrollToSearch}
-          className="flex flex-col items-center justify-center py-1 px-3 min-h-[44px] text-foreground hover:text-primary cursor-pointer transition-colors"
+          className="flex flex-col items-center justify-center py-1 px-1 min-h-[46px] text-foreground hover:text-primary cursor-pointer transition-colors"
           title="Cerca articoli"
         >
           <span className="text-base leading-none">🔍</span>
-          <span className="text-[10px] uppercase font-bold tracking-tight mt-0.5">Cerca</span>
+          <span className="text-[10px] uppercase font-bold tracking-tight mt-0.5 truncate">Cerca</span>
+        </button>
+
+        {/* 24h Trend Analytics Dashboard */}
+        <button
+          type="button"
+          onClick={() => setShowAnalyticsDashboard(true)}
+          className="flex flex-col items-center justify-center py-1 px-1 min-h-[46px] text-foreground hover:text-primary cursor-pointer transition-colors"
+          title="Trend Tematici 24h"
+        >
+          <span className="text-base leading-none">📊</span>
+          <span className="text-[10px] uppercase font-bold tracking-tight mt-0.5 truncate">Trend 24h</span>
         </button>
 
         {/* Notifications Modal */}
@@ -2328,13 +2478,13 @@ export default function App() {
             setShowNotifModal(true);
             setUnreadNotifCount(0);
           }}
-          className="relative flex flex-col items-center justify-center py-1 px-3 min-h-[44px] text-foreground hover:text-primary cursor-pointer transition-colors"
+          className="relative flex flex-col items-center justify-center py-1 px-1 min-h-[46px] text-foreground hover:text-primary cursor-pointer transition-colors"
           title="Notifiche Live"
         >
           <span className="text-base leading-none">🔔</span>
-          <span className="text-[10px] uppercase font-bold tracking-tight mt-0.5">Avvisi</span>
+          <span className="text-[10px] uppercase font-bold tracking-tight mt-0.5 truncate">Avvisi</span>
           {unreadNotifCount > 0 && (
-            <span className="absolute top-1 right-2 bg-primary text-primary-foreground text-[9px] font-bold h-4 w-4 rounded-full flex items-center justify-center animate-pulse">
+            <span className="absolute top-1 right-3 bg-primary text-primary-foreground text-[9px] font-bold h-4 w-4 rounded-full flex items-center justify-center animate-pulse">
               {unreadNotifCount}
             </span>
           )}
@@ -2344,18 +2494,21 @@ export default function App() {
         <button
           type="button"
           onClick={handleScrollToTop}
-          className="flex flex-col items-center justify-center py-1 px-3 min-h-[44px] text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+          className="flex flex-col items-center justify-center py-1 px-1 min-h-[46px] text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
           title="Torna in cima"
         >
           <span className="text-base leading-none">⬆</span>
-          <span className="text-[10px] uppercase font-bold tracking-tight mt-0.5">In Cima</span>
+          <span className="text-[10px] uppercase font-bold tracking-tight mt-0.5 truncate">In Cima</span>
         </button>
       </nav>
 
       {/* MODAL: ADMIN LOGIN */}
       {showLoginModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-4 animate-in fade-in">
-          <div className="w-full max-w-md border-3 sm:border-4 border-border bg-card p-4 sm:p-6 shadow-[5px_5px_0_0_var(--foreground)] sm:shadow-[8px_8px_0_0_var(--foreground)] max-h-[92vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 p-0 sm:p-4 animate-in fade-in">
+          <div className="w-full max-w-md border-t-3 sm:border-4 border-border bg-card rounded-t-2xl sm:rounded-none p-4 sm:p-6 shadow-[0_-8px_30px_rgba(0,0,0,0.35)] sm:shadow-[8px_8px_0_0_var(--foreground)] max-h-[92dvh] overflow-y-auto">
+            <div className="sm:hidden flex justify-center pb-2">
+              <div className="w-10 h-1.5 rounded-full bg-border" />
+            </div>
             <div className="flex items-center justify-between border-b-2 border-border pb-3">
               <div>
                 <h3 className="text-lg sm:text-xl font-bold tracking-tight" style={fontFraunces}>
@@ -2439,8 +2592,11 @@ export default function App() {
 
       {/* MODAL: REAL-TIME NOTIFICATIONS REGISTRATION & FEED */}
       {showNotifModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-4 animate-in fade-in">
-          <div className="w-full max-w-lg border-3 sm:border-4 border-border bg-card p-4 sm:p-6 shadow-[5px_5px_0_0_var(--foreground)] sm:shadow-[8px_8px_0_0_var(--foreground)] max-h-[92vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 p-0 sm:p-4 animate-in fade-in">
+          <div className="w-full max-w-lg border-t-3 sm:border-4 border-border bg-card rounded-t-2xl sm:rounded-none p-4 sm:p-6 shadow-[0_-8px_30px_rgba(0,0,0,0.35)] sm:shadow-[8px_8px_0_0_var(--foreground)] max-h-[92dvh] overflow-y-auto">
+            <div className="sm:hidden flex justify-center pb-2">
+              <div className="w-10 h-1.5 rounded-full bg-border" />
+            </div>
             <div className="flex items-center justify-between border-b-2 border-border pb-3">
               <div>
                 <h3 className="text-lg sm:text-xl font-bold tracking-tight flex items-center gap-2" style={fontFraunces}>
@@ -2595,14 +2751,22 @@ export default function App() {
                         <span className="font-bold text-foreground truncate">{notif.feedTitle || 'Feed'}</span>
                         <span className="shrink-0">{new Date(notif.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                       </div>
-                      <a
-                        href={notif.link}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="font-bold hover:text-primary block line-clamp-2"
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowNotifModal(false);
+                          handleOpenArticle({
+                            title: notif.title,
+                            link: notif.link,
+                            description: notif.message,
+                            feedTitle: notif.feedTitle,
+                            date: new Date(notif.createdAt).toLocaleDateString('it-IT'),
+                          });
+                        }}
+                        className="text-left font-bold hover:text-primary block line-clamp-2 cursor-pointer w-full"
                       >
                         {notif.title}
-                      </a>
+                      </button>
                     </div>
                   ))}
                 </div>
@@ -2614,8 +2778,11 @@ export default function App() {
 
       {/* MODAL: ADD FEEDS TO PAGE (ADMIN) */}
       {showAddFeedsModal && activePage && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-4 animate-in fade-in">
-          <div className="w-full max-w-lg border-3 sm:border-4 border-border bg-card p-4 sm:p-6 shadow-[5px_5px_0_0_var(--foreground)] sm:shadow-[8px_8px_0_0_var(--foreground)] max-h-[92vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 p-0 sm:p-4 animate-in fade-in">
+          <div className="w-full max-w-lg border-t-3 sm:border-4 border-border bg-card rounded-t-2xl sm:rounded-none p-4 sm:p-6 shadow-[0_-8px_30px_rgba(0,0,0,0.35)] sm:shadow-[8px_8px_0_0_var(--foreground)] max-h-[92dvh] overflow-y-auto">
+            <div className="sm:hidden flex justify-center pb-2">
+              <div className="w-10 h-1.5 rounded-full bg-border" />
+            </div>
             <div className="flex items-center justify-between border-b-2 border-border pb-3">
               <div>
                 <h3 className="text-lg sm:text-xl font-bold tracking-tight" style={fontFraunces}>
@@ -2764,8 +2931,11 @@ export default function App() {
 
       {/* MODAL: CREATE NEW PAGE (ADMIN) */}
       {showNewPageModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-4 animate-in fade-in">
-          <div className="w-full max-w-lg border-3 sm:border-4 border-border bg-card p-4 sm:p-6 shadow-[5px_5px_0_0_var(--foreground)] sm:shadow-[8px_8px_0_0_var(--foreground)] max-h-[92vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 p-0 sm:p-4 animate-in fade-in">
+          <div className="w-full max-w-lg border-t-3 sm:border-4 border-border bg-card rounded-t-2xl sm:rounded-none p-4 sm:p-6 shadow-[0_-8px_30px_rgba(0,0,0,0.35)] sm:shadow-[8px_8px_0_0_var(--foreground)] max-h-[92dvh] overflow-y-auto">
+            <div className="sm:hidden flex justify-center pb-2">
+              <div className="w-10 h-1.5 rounded-full bg-border" />
+            </div>
             <div className="flex items-center justify-between border-b-2 border-border pb-3">
               <h3 className="text-lg sm:text-xl font-bold tracking-tight" style={fontFraunces}>
                 Crea Nuova Pagina Tematica
@@ -2961,11 +3131,11 @@ export default function App() {
       <ArticleDetailModal
         article={readingArticle}
         isOpen={Boolean(readingArticle)}
-        onClose={() => setReadingArticle(null)}
+        onClose={handleCloseArticleModal}
         isAdmin={isAdmin}
         adminMode={adminMode}
         onEdit={(art) => {
-          setReadingArticle(null);
+          handleCloseArticleModal();
           setArticleToEdit(art);
           setShowManualArticleModal(true);
         }}
@@ -2977,6 +3147,7 @@ export default function App() {
         hasNextArticle={hasNextArticle}
         currentIndex={readingArticleIndex >= 0 ? readingArticleIndex + 1 : undefined}
         totalArticles={displayedArticles.length}
+        activePageSlugOrId={activePage?.slug || activePage?.id}
       />
 
       {/* MODAL: OLLAMA AI SUPER ADMINISTRATOR */}
