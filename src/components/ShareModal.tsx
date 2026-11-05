@@ -1,7 +1,25 @@
 import React, { useState, useEffect } from 'react';
 import { SocialShareKit } from '../lib/firebase';
-import { ensureInternalSiteUrl } from '../lib/shareUtils';
-import { Sparkles, Check, Copy, ExternalLink, Share2, MessageCircle, Send, Globe, RefreshCw, ShieldCheck } from 'lucide-react';
+import {
+  ensureInternalSiteUrl,
+  resolveSocialImage,
+  buildProxiedOgImageUrl,
+  getFallbackSocialImage,
+  syncDocumentSocialMeta,
+} from '../lib/shareUtils';
+import {
+  Sparkles,
+  Check,
+  Copy,
+  ExternalLink,
+  Share2,
+  MessageCircle,
+  Send,
+  Globe,
+  RefreshCw,
+  ShieldCheck,
+  Image as ImageIcon,
+} from 'lucide-react';
 
 export interface ShareData {
   title: string;
@@ -29,22 +47,29 @@ export function ShareModal({ isOpen, onClose, data }: ShareModalProps) {
   const [activeTab, setActiveTab] = useState<'quick' | 'ollama_copy' | 'preview'>('quick');
   const [dynamicSocial, setDynamicSocial] = useState<SocialShareKit | null>(null);
   const [generatingOllama, setGeneratingOllama] = useState(false);
+  const [customImageUrl, setCustomImageUrl] = useState<string>('');
+  const [editingImage, setEditingImage] = useState(false);
 
-  // Reset state when modal opens for a new item
+  // Reset and auto-elaborate social copy + og:image when modal opens
   useEffect(() => {
     if (!isOpen || !data) {
       setDynamicSocial(null);
       setGeneratingOllama(false);
-      return;
-    }
-    if (data.socialShare) {
-      setDynamicSocial(data.socialShare);
+      setCustomImageUrl('');
+      setEditingImage(false);
       return;
     }
 
-    // Auto-elaborate social share kit via Ollama endpoint if not pre-populated
+    const initialImg = resolveSocialImage(data.image, data.title, data.source);
+    setCustomImageUrl(initialImg);
+
+    if (data.socialShare) {
+      setDynamicSocial(data.socialShare);
+    }
+
     let cancelled = false;
     setGeneratingOllama(true);
+
     fetch('/api/ollama/social-kit', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -52,16 +77,24 @@ export function ShareModal({ isOpen, onClose, data }: ShareModalProps) {
         title: data.title,
         description: data.text || '',
         source: data.source || 'puulp.it',
+        image: data.image || '',
+        externalUrl: data.externalSourceUrl || '',
+        slug: data.articleSlug || data.pageSlug || '',
+        pageSlug: data.pageSlug || '',
       }),
     })
       .then((r) => (r.ok ? r.json() : null))
       .then((resData) => {
-        if (!cancelled && resData?.socialShare) {
+        if (cancelled || !resData) return;
+        if (resData.socialShare && !data.socialShare) {
           setDynamicSocial(resData.socialShare);
+        }
+        if (resData.resolvedImage && (!data.image || data.image.endsWith('.svg'))) {
+          setCustomImageUrl(resData.resolvedImage);
         }
       })
       .catch(() => {
-        // Fallback deterministic copy is already handled below
+        // Fallback deterministic copy and image are already active
       })
       .finally(() => {
         if (!cancelled) setGeneratingOllama(false);
@@ -72,17 +105,70 @@ export function ShareModal({ isOpen, onClose, data }: ShareModalProps) {
     };
   }, [isOpen, data]);
 
+  // Synchronize document <head> OpenGraph tags and server registry whenever active image/copy changes
+  useEffect(() => {
+    if (!isOpen || !data) return;
+    const social = dynamicSocial || data.socialShare;
+    const ogTitle = social?.ogTitle || `${data.title} — puulp.it`;
+    const ogDesc =
+      social?.ogDescription || data.text || 'Leggi tutti i dettagli, i feed e gli approfondimenti su puulp.it.';
+    const activeImg = resolveSocialImage(customImageUrl || data.image, data.title, data.source);
+    const currentSiteUrl = ensureInternalSiteUrl(data.url, {
+      title: data.title,
+      description: ogDesc,
+      image: activeImg,
+      category: data.source,
+      pageSlugOrId: data.pageSlug,
+      articleSlug: data.articleSlug,
+    });
+
+    syncDocumentSocialMeta({
+      title: ogTitle,
+      description: ogDesc,
+      image: activeImg,
+      url: currentSiteUrl,
+      category: data.source,
+      type: data.articleSlug ? 'article' : 'website',
+    });
+
+    const slugToRegister = data.articleSlug || data.pageSlug;
+    if (slugToRegister) {
+      fetch('/api/share-meta', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          slug: slugToRegister,
+          pageSlug: data.pageSlug,
+          title: ogTitle,
+          description: ogDesc,
+          image: activeImg,
+        }),
+      }).catch(() => {});
+    }
+  }, [isOpen, data, dynamicSocial, customImageUrl]);
+
   if (!isOpen || !data) return null;
 
+  const social = dynamicSocial || data.socialShare;
+  const activeImage = resolveSocialImage(customImageUrl || data.image, data.title, data.source);
+  const proxiedOgImage = buildProxiedOgImageUrl(activeImage, data.title, data.source);
+  const fallbackTopicImg = getFallbackSocialImage(data.title, data.source);
+
+  const ogTitle = social?.ogTitle || `${data.title} — puulp.it`;
+  const ogDescription =
+    social?.ogDescription || data.text || 'Leggi tutti i dettagli, i feed e gli approfondimenti su puulp.it.';
+
   // CRITICAL: Ensure the shared URL ALWAYS points to our site (puulp.it / window.location.origin)
-  // and NEVER to the external news source!
+  // AND embeds `img` and `t` so social crawlers (WhatsApp, Facebook, X, LinkedIn, Telegram)
+  // always render the image in the social post preview!
   const siteUrl = ensureInternalSiteUrl(data.url, {
     title: data.title,
+    description: ogDescription,
+    image: activeImage,
+    category: data.source,
     pageSlugOrId: data.pageSlug,
     articleSlug: data.articleSlug,
   });
-
-  const social = dynamicSocial || data.socialShare;
 
   // Optimized copy texts (use Ollama copy if available, else derive rich Italian copy pointing to puulp.it)
   const twitterText =
@@ -101,9 +187,6 @@ export function ShareModal({ isOpen, onClose, data }: ShareModalProps) {
     `📢 ${data.title}\n\n${data.text || 'Approfondimento e rassegna stampa in tempo reale su puulp.it.'}\n\nConsulta l'articolo completo sul nostro portale:\n${
       social?.hashtags?.join(' ') || '#puulp #Innovazione #Informazione #News'
     }`;
-  const ogTitle = social?.ogTitle || `${data.title} — puulp.it`;
-  const ogDescription =
-    social?.ogDescription || data.text || 'Leggi tutti i dettagli, i feed e gli approfondimenti su puulp.it.';
 
   const encodedUrl = encodeURIComponent(siteUrl);
   const encodedTwitter = encodeURIComponent(twitterText);
@@ -180,12 +263,19 @@ export function ShareModal({ isOpen, onClose, data }: ShareModalProps) {
           title: data.title,
           description: data.text || '',
           source: data.source || 'puulp.it',
+          image: customImageUrl || data.image || '',
+          externalUrl: data.externalSourceUrl || '',
+          slug: data.articleSlug || data.pageSlug || '',
+          pageSlug: data.pageSlug || '',
         }),
       });
       if (res.ok) {
         const resData = await res.json();
         if (resData?.socialShare) {
           setDynamicSocial(resData.socialShare);
+        }
+        if (resData?.resolvedImage && !customImageUrl) {
+          setCustomImageUrl(resData.resolvedImage);
         }
       }
     } catch {
@@ -234,7 +324,7 @@ export function ShareModal({ isOpen, onClose, data }: ShareModalProps) {
               </span>
               <span className="text-[9px] uppercase font-extrabold bg-emerald-500/15 text-emerald-700 px-1.5 py-0.5 border border-emerald-500/30 flex items-center gap-1">
                 <ShieldCheck className="w-2.5 h-2.5" />
-                <span>Link Interno al Sito</span>
+                <span>Immagine OpenGraph Attiva</span>
               </span>
               {generatingOllama ? (
                 <span className="text-[9px] uppercase font-bold bg-primary/10 text-primary px-1.5 py-0.5 border border-primary/30 flex items-center gap-1">
@@ -308,34 +398,67 @@ export function ShareModal({ isOpen, onClose, data }: ShareModalProps) {
 
         {/* Modal Scrollable Body */}
         <div className="flex-1 overflow-y-auto p-1 sm:p-2 space-y-4 mt-2.5">
-          {/* TAB 1: QUICK 1-CLICK SHARE */}
+          {/* TAB 1: QUICK 1-CLICK SHARE WITH VISIBLE SOCIAL CARD IMAGE PREVIEW */}
           {activeTab === 'quick' && (
             <div className="space-y-4">
-              {/* Content Preview Snippet */}
-              <div className="border-2 border-border bg-muted/20 p-3 flex flex-col sm:flex-row gap-3 items-start shadow-xs">
-                {data.image && (
+              {/* Rich Social Post Preview Card (Always displays the 1200x630 image) */}
+              <div className="border-2 border-border bg-card overflow-hidden shadow-[3px_3px_0_0_var(--foreground)]">
+                <div className="relative aspect-[1200/630] max-h-44 sm:max-h-52 w-full bg-stone-900 overflow-hidden">
                   <img
-                    src={data.image}
-                    alt=""
+                    src={proxiedOgImage}
+                    alt={ogTitle}
                     onError={(e) => {
-                      e.currentTarget.style.display = 'none';
+                      const target = e.currentTarget;
+                      if (!target.dataset.triedFallback) {
+                        target.dataset.triedFallback = 'true';
+                        target.src = fallbackTopicImg;
+                      }
                     }}
-                    className="h-28 w-full sm:h-16 sm:w-24 shrink-0 border border-border object-cover bg-muted"
+                    className="w-full h-full object-cover"
                   />
-                )}
-                <div className="min-w-0 flex-1 text-xs">
-                  {data.source && (
-                    <span className="text-[10px] uppercase font-bold tracking-wider text-primary block mb-0.5">
-                      Canale · {data.source}
+                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent p-2.5 flex items-center justify-between gap-2">
+                    <span className="bg-primary text-primary-foreground text-[10px] font-mono font-bold uppercase px-2 py-0.5 border border-black/40">
+                      puulp.it · {data.source || 'Articolo'}
                     </span>
-                  )}
+                    <button
+                      type="button"
+                      onClick={() => setEditingImage(!editingImage)}
+                      className="bg-black/75 hover:bg-black text-white text-[10px] font-mono px-2 py-1 border border-white/25 flex items-center gap-1 cursor-pointer"
+                      title="Cambia o personalizza l'immagine dell'anteprima social"
+                    >
+                      <ImageIcon className="w-3 h-3 text-primary" />
+                      <span>{editingImage ? 'Chiudi Foto' : 'Cambia Immagine'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {editingImage && (
+                  <div className="p-2.5 bg-muted/40 border-b border-border flex flex-col sm:flex-row gap-2">
+                    <input
+                      type="url"
+                      value={customImageUrl}
+                      onChange={(e) => setCustomImageUrl(e.target.value)}
+                      placeholder="https://esempio.it/immagine-articolo.jpg"
+                      className="flex-1 border border-border bg-background px-2.5 py-1.5 text-base sm:text-xs font-mono outline-none focus:border-primary min-h-[38px]"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setCustomImageUrl(fallbackTopicImg)}
+                      className="border border-border bg-card hover:bg-muted px-2.5 py-1.5 text-[11px] font-bold uppercase cursor-pointer min-h-[38px]"
+                    >
+                      Usa Copertina Redazione
+                    </button>
+                  </div>
+                )}
+
+                <div className="p-3 bg-muted/15">
                   <h4
-                    className="font-extrabold text-foreground text-sm line-clamp-2 leading-snug"
+                    className="font-extrabold text-foreground text-sm sm:text-base line-clamp-2 leading-snug"
                     style={{ fontFamily: 'Fraunces, Georgia, serif' }}
                   >
-                    {data.title}
+                    {ogTitle}
                   </h4>
-                  <p className="mt-1 text-[11px] text-muted-foreground line-clamp-2">
+                  <p className="mt-1 text-[11px] text-muted-foreground line-clamp-2 leading-relaxed">
                     {ogDescription}
                   </p>
                 </div>
@@ -345,7 +468,7 @@ export function ShareModal({ isOpen, onClose, data }: ShareModalProps) {
               <div>
                 <div className="flex items-center justify-between mb-2 gap-2">
                   <span className="text-[11px] uppercase tracking-wider font-extrabold text-foreground">
-                    Condividi ora (porta i lettori su puulp.it):
+                    Condividi con anteprima immagine su puulp.it:
                   </span>
                   <button
                     type="button"
@@ -386,11 +509,11 @@ export function ShareModal({ isOpen, onClose, data }: ShareModalProps) {
                 </div>
               </div>
 
-              {/* Quick Link Copy Field (Strictly pointing to puulp.it) */}
+              {/* Quick Link Copy Field (Strictly pointing to puulp.it with OG image params) */}
               <div className="border-t border-border/50 pt-3 text-xs">
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="block text-[11px] uppercase tracking-wider font-extrabold text-foreground">
-                    🔗 Link Diretto al Sito (apre l'articolo su puulp.it):
+                    🔗 Link Diretto al Sito (include anteprima immagine OpenGraph):
                   </label>
                 </div>
                 <div className="flex flex-col sm:flex-row gap-2">
@@ -424,7 +547,7 @@ export function ShareModal({ isOpen, onClose, data }: ShareModalProps) {
                 <div className="flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-primary shrink-0" />
                   <span className="font-semibold text-foreground">
-                    Copy ottimizzato da Ollama con link diretto al tuo sito
+                    Copy ottimizzato da Ollama con link e immagine del tuo sito
                   </span>
                 </div>
                 <button
@@ -548,31 +671,26 @@ export function ShareModal({ isOpen, onClose, data }: ShareModalProps) {
           {activeTab === 'preview' && (
             <div className="space-y-4">
               <div className="text-xs text-muted-foreground">
-                Anteprima della Social Card che porta i visitatori direttamente su <strong>puulp.it</strong>:
+                Anteprima reale della Social Card 1200×630 (JPEG) che appare su WhatsApp, Facebook, X, Telegram e LinkedIn:
               </div>
 
               {/* Social Card Simulation */}
               <div className="border-2 border-border rounded-lg overflow-hidden bg-card shadow-[4px_4px_0_0_var(--foreground)]">
                 <div className="relative aspect-[1200/630] w-full bg-stone-900 flex items-center justify-center overflow-hidden">
-                  {data.image ? (
-                    <img
-                      src={data.image}
-                      alt={ogTitle}
-                      className="w-full h-full object-cover"
-                      onError={(e) => {
-                        e.currentTarget.style.display = 'none';
-                      }}
-                    />
-                  ) : (
-                    <div className="p-6 text-center text-stone-200">
-                      <div className="text-2xl font-black" style={{ fontFamily: 'Fraunces, Georgia, serif' }}>
-                        puulp.it
-                      </div>
-                      <p className="text-xs mt-1 text-stone-400">Rassegna Stampa & Feed Live</p>
-                    </div>
-                  )}
-                  <span className="absolute bottom-2 left-2 bg-black/75 text-white text-[10px] font-mono px-2 py-0.5 rounded">
-                    1200 × 630 px · OpenGraph Card
+                  <img
+                    src={proxiedOgImage}
+                    alt={ogTitle}
+                    className="w-full h-full object-cover"
+                    onError={(e) => {
+                      const target = e.currentTarget;
+                      if (!target.dataset.triedFallback) {
+                        target.dataset.triedFallback = 'true';
+                        target.src = fallbackTopicImg;
+                      }
+                    }}
+                  />
+                  <span className="absolute bottom-2 left-2 bg-black/80 text-white text-[10px] font-mono px-2 py-0.5 rounded">
+                    1200 × 630 px · image/jpeg (OpenGraph & Twitter Card)
                   </span>
                 </div>
 
@@ -598,9 +716,10 @@ export function ShareModal({ isOpen, onClose, data }: ShareModalProps) {
               </div>
 
               {/* Metadata Details */}
-              <div className="p-3 bg-muted/20 border border-border text-xs space-y-1 font-mono break-all">
+              <div className="p-3 bg-muted/20 border border-border text-xs space-y-1.5 font-mono break-all">
                 <div><strong>og:title:</strong> {ogTitle}</div>
                 <div><strong>og:description:</strong> {ogDescription}</div>
+                <div><strong>og:image (Proxy JPEG):</strong> {proxiedOgImage}</div>
                 <div><strong>og:url (Destinazione Sito):</strong> {siteUrl}</div>
                 {social?.hashtags && (
                   <div><strong>Hashtags:</strong> {social.hashtags.join(', ')}</div>

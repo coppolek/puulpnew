@@ -480,6 +480,9 @@ export default function App() {
     const fallbackPage = data.pageSlug || activePage?.slug || activePage?.id;
     const internalUrl = ensureInternalSiteUrl(data.url, {
       title: data.title,
+      description: data.text,
+      image: data.image,
+      category: data.source || activePage?.category,
       pageSlugOrId: fallbackPage,
       articleSlug: data.articleSlug,
     });
@@ -1882,6 +1885,8 @@ export default function App() {
                 const siteArticleUrl = buildSiteArticleUrl(
                   {
                     title: item.title,
+                    image: item.image || item.rawArticle?.image,
+                    category: activePage?.category || item.feedTitle,
                     link: item.link,
                     slug: item.rawArticle?.slug,
                     id: item.rawArticle?.id,
@@ -1930,7 +1935,8 @@ export default function App() {
                                 item.description ||
                                 `Leggi questo articolo su puulp.it:`,
                               url: siteArticleUrl,
-                              image: item.image,
+                              externalSourceUrl: item.link,
+                              image: item.image || item.rawArticle?.image,
                               source: item.feedTitle,
                               socialShare: item.rawArticle?.socialShare,
                               pageSlug: activePage?.slug || activePage?.id,
@@ -2024,7 +2030,8 @@ export default function App() {
                                       item.description ||
                                       `Leggi "${item.title}" su puulp.it:`,
                                     url: siteArticleUrl,
-                                    image: item.image,
+                                    externalSourceUrl: item.link,
+                                    image: item.image || item.rawArticle?.image,
                                     source: item.feedTitle,
                                     socialShare: item.rawArticle?.socialShare,
                                     pageSlug: activePage?.slug || activePage?.id,

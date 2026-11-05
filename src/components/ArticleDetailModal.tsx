@@ -1,6 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { ManualArticle, SocialShareKit } from '../lib/firebase';
-import { buildSiteArticleUrl, getArticleSiteSlug } from '../lib/shareUtils';
+import {
+  buildSiteArticleUrl,
+  getArticleSiteSlug,
+  resolveSocialImage,
+  syncDocumentSocialMeta,
+} from '../lib/shareUtils';
 import { ExternalLink, Calendar, User, Clock, Share2, Edit3, Trash2, Sparkles, Loader2, BookOpen, Check, Copy } from 'lucide-react';
 import { FormattedArticleContent } from './FormattedArticleContent.tsx';
 import { AdSenseBanner } from './AdSenseBanner.tsx';
@@ -67,6 +72,7 @@ export function ArticleDetailModal({
   totalArticles,
 }: ArticleDetailModalProps) {
   const [fullContent, setFullContent] = useState<string>('');
+  const [fetchedImage, setFetchedImage] = useState<string>('');
   const [loadingFullContent, setLoadingFullContent] = useState<boolean>(false);
   const [copiedLink, setCopiedLink] = useState(false);
 
@@ -74,17 +80,19 @@ export function ArticleDetailModal({
   useEffect(() => {
     if (!article || !isOpen) {
       setFullContent('');
+      setFetchedImage('');
       setLoadingFullContent(false);
       return;
     }
 
+    setFetchedImage('');
     if (article.content) {
       setFullContent(article.content);
       setLoadingFullContent(false);
       return;
     }
 
-    // If it's a feed article with an external link, try to load full readable body
+    // If it's a feed article with an external link, try to load full readable body and og:image
     if (!article.isManual && article.link && article.link.startsWith('http')) {
       setLoadingFullContent(true);
       let isCancelled = false;
@@ -92,8 +100,12 @@ export function ArticleDetailModal({
       fetch(`/api/article-content?url=${encodeURIComponent(article.link)}`)
         .then((res) => (res.ok ? res.json() : Promise.reject('Fetch error')))
         .then((data) => {
-          if (!isCancelled && data && data.content && data.content.trim().length > 50) {
+          if (isCancelled || !data) return;
+          if (data.content && data.content.trim().length > 50) {
             setFullContent(data.content);
+          }
+          if (data.image && typeof data.image === 'string') {
+            setFetchedImage(data.image);
           }
         })
         .catch(() => {
@@ -134,15 +146,20 @@ export function ArticleDetailModal({
 
     const prevTitle = document.title;
     const effectiveTitle = article.metaTitle || article.title;
-    document.title = `${effectiveTitle} — puulp.it`;
+    const effectiveImg = resolveSocialImage(article.image || fetchedImage, article.title, article.category);
+    const siteArticleUrl = buildSiteArticleUrl(
+      { ...article, image: effectiveImg },
+      article.pageId || activePageSlugOrId
+    );
 
-    const metaDesc = document.querySelector('meta[name="description"]');
-    const prevDesc = metaDesc ? metaDesc.getAttribute('content') : null;
-    if (metaDesc && (article.metaDescription || article.description)) {
-      metaDesc.setAttribute('content', article.metaDescription || article.description || '');
-    }
-
-    const siteArticleUrl = buildSiteArticleUrl(article, article.pageId || activePageSlugOrId);
+    syncDocumentSocialMeta({
+      title: effectiveTitle,
+      description: article.metaDescription || article.description,
+      image: effectiveImg,
+      url: siteArticleUrl,
+      category: article.category || article.feedTitle,
+      type: 'article',
+    });
 
     // Sync browser address bar with ?art=... so even copying from the browser bar shares the site!
     try {
@@ -171,7 +188,7 @@ export function ArticleDetailModal({
       '@type': article.schemaType || 'NewsArticle',
       headline: article.title,
       description: article.metaDescription || article.description,
-      image: article.image || undefined,
+      image: effectiveImg,
       datePublished: article.createdAt || article.date || new Date().toISOString(),
       dateModified: article.updatedAt || article.createdAt || new Date().toISOString(),
       author: {
@@ -194,19 +211,27 @@ export function ArticleDetailModal({
 
     return () => {
       document.title = prevTitle;
-      if (metaDesc && prevDesc) metaDesc.setAttribute('content', prevDesc);
       if (scriptEl && scriptEl.parentElement) {
         scriptEl.parentElement.removeChild(scriptEl);
       }
     };
-  }, [article, isOpen, activePageSlugOrId]);
+  }, [article, isOpen, activePageSlugOrId, fetchedImage]);
 
   if (!isOpen || !article) return null;
 
   const fontFraunces = { fontFamily: 'Fraunces, Georgia, serif' };
 
-  // CRITICAL: Share URL ALWAYS points to our site (puulp.it) and NEVER to the external source!
-  const shareUrl = buildSiteArticleUrl(article, article.pageId || activePageSlugOrId);
+  const effectiveArticleImage = resolveSocialImage(
+    article.image || fetchedImage,
+    article.title,
+    article.category || article.feedTitle
+  );
+
+  // CRITICAL: Share URL ALWAYS points to our site (puulp.it) and includes the article image for social crawlers
+  const shareUrl = buildSiteArticleUrl(
+    { ...article, image: effectiveArticleImage },
+    article.pageId || activePageSlugOrId
+  );
   const articleSiteSlug = getArticleSiteSlug(article);
 
   const textToCount = fullContent || article.content || article.description || '';
@@ -237,7 +262,7 @@ export function ArticleDetailModal({
         externalSourceUrl: article.link,
         pageSlug: article.pageId || activePageSlugOrId,
         articleSlug: articleSiteSlug,
-        image: article.image,
+        image: effectiveArticleImage,
         source: displaySource,
         socialShare: activeSocial,
       });
@@ -393,10 +418,10 @@ export function ArticleDetailModal({
           </div>
 
           {/* Featured Image */}
-          {article.image && (
+          {(article.image || fetchedImage) && (
             <div className="border-2 border-border overflow-hidden bg-muted">
               <img
-                src={article.image}
+                src={article.image || fetchedImage}
                 alt={article.title}
                 className="w-full max-h-[280px] sm:max-h-[380px] object-cover"
                 onError={(e) => {

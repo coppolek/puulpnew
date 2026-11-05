@@ -2811,6 +2811,10 @@ Struttura JSON obbligatoria:
         title = 'Articolo su puulp.it',
         description = '',
         source = 'puulp.it',
+        image = '',
+        externalUrl = '',
+        slug = '',
+        pageSlug = '',
         endpoint: rawEndpoint = 'http://localhost:11434',
         model = 'llama3.2',
       } = req.body || {};
@@ -2820,6 +2824,44 @@ Struttura JSON obbligatoria:
       const cleanSource = String(source).trim();
       const endpoint = String(rawEndpoint).trim().replace(/\/+$/, '');
       const isLocalhostEndpoint = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(endpoint);
+
+      // Resolve article image: if missing or SVG, try extracting og:image from externalUrl (fast 2.2s timeout), else topic fallback
+      let resolvedImage = String(image || '').trim();
+      if (!resolvedImage || resolvedImage.endsWith('.svg') || resolvedImage.includes('/og-image.svg')) {
+        resolvedImage = '';
+        if (externalUrl && /^https?:\/\//i.test(String(externalUrl).trim())) {
+          try {
+            const targetExt = String(externalUrl).trim();
+            const extRes = await fetch(targetExt, {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
+                Accept: 'text/html,application/xhtml+xml',
+              },
+              redirect: 'follow',
+              signal: AbortSignal.timeout(2200),
+            });
+            if (extRes.ok) {
+              const extHtml = await extRes.text();
+              const $ext = cheerio.load(extHtml);
+              const extractedOg =
+                $ext('meta[property="og:image"]').attr('content') ||
+                $ext('meta[name="twitter:image"]').attr('content') ||
+                $ext('article img, main img').first().attr('src');
+              if (extractedOg) {
+                const sanitized = sanitizeAndResolveImageUrl(extractedOg, targetExt);
+                if (sanitized && !sanitized.endsWith('.svg')) {
+                  resolvedImage = sanitized;
+                }
+              }
+            }
+          } catch {
+            // fallback below
+          }
+        }
+      }
+      if (!resolvedImage) {
+        resolvedImage = getServerFallbackSocialImage(cleanTitle, cleanSource);
+      }
 
       const systemPrompt = `Sei il Social Media Manager AI di puulp.it.
 Elabora un kit di condivisione social in formato JSON valido che inviti gli utenti a cliccare sul link e leggere la notizia direttamente sul portale puulp.it.
@@ -2922,11 +2964,257 @@ Rispondi SOLO con JSON valido:
         };
       }
 
-      return res.json({ ok: true, socialShare });
+      if (slug) {
+        socialMetaRegistry.set(String(slug).trim().toLowerCase(), {
+          title: socialShare?.ogTitle || cleanTitle,
+          description: socialShare?.ogDescription || cleanDesc,
+          image: resolvedImage,
+          pageSlug: pageSlug ? String(pageSlug).trim() : undefined,
+        });
+      }
+
+      return res.json({ ok: true, socialShare, resolvedImage });
     } catch {
       return res.json({ ok: false });
     }
   });
+
+  // In-memory registry of shared articles/pages for instant OpenGraph tag injection
+  const socialMetaRegistry = new Map<
+    string,
+    { title: string; description: string; image: string; pageSlug?: string }
+  >();
+  const ogImageBufferCache = new Map<string, { buffer: Buffer; contentType: string; ts: number }>();
+
+  function getServerFallbackSocialImage(title?: string, category?: string): string {
+    const combined = `${title || ''} ${category || ''}`.toLowerCase();
+    if (/intelligenza artificiale|ollama|llm|gpt|gemini|openai|neural/.test(combined)) {
+      return 'https://images.unsplash.com/photo-1677442136019-21780ecad995?w=1200&h=630&fit=crop&q=85';
+    }
+    if (/tech|software|svilupp|codice|cloud|cyber|smartphone|apple|android|computer/.test(combined)) {
+      return 'https://images.unsplash.com/photo-1518770660439-4636190af475?w=1200&h=630&fit=crop&q=85';
+    }
+    if (/finanz|mercat|borsa|econom|pil|inflazion|tassi|cripto|bitcoin/.test(combined)) {
+      return 'https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?w=1200&h=630&fit=crop&q=85';
+    }
+    if (/sport|calcio|serie a|champions|f1|motogp|tennis/.test(combined)) {
+      return 'https://images.unsplash.com/photo-1461896836934-ffe607ba8211?w=1200&h=630&fit=crop&q=85';
+    }
+    if (/scienz|spazio|nasa|clima|ambiente|medicin|salute/.test(combined)) {
+      return 'https://images.unsplash.com/photo-1507413245164-6160d8298b31?w=1200&h=630&fit=crop&q=85';
+    }
+    if (/shop|offert|amazon|scont|prezz|affiliat/.test(combined)) {
+      return 'https://images.unsplash.com/photo-1607082348824-0a96f2a4b9da?w=1200&h=630&fit=crop&q=85';
+    }
+    return 'https://images.unsplash.com/photo-1504711434969-e33886168f5c?w=1200&h=630&fit=crop&q=85';
+  }
+
+  // Register article/page OpenGraph metadata from client
+  app.post('/api/share-meta', (req: Request, res: Response) => {
+    try {
+      const { slug, pageSlug, title, description, image } = req.body || {};
+      if (slug && title) {
+        socialMetaRegistry.set(String(slug).trim().toLowerCase(), {
+          title: String(title).trim(),
+          description: String(description || '').trim(),
+          image: String(image || '').trim() || getServerFallbackSocialImage(title, pageSlug),
+          pageSlug: pageSlug ? String(pageSlug).trim() : undefined,
+        });
+      }
+      res.json({ ok: true });
+    } catch {
+      res.json({ ok: false });
+    }
+  });
+
+  // Raster OpenGraph Image Proxy & Fallback Endpoint for Social Crawlers (WhatsApp, Facebook, X, LinkedIn, Telegram)
+  // Crawlers reject .svg files and often get blocked by third-party news site hotlink protections.
+  // This endpoint guarantees a valid 200 OK raster image/jpeg or image/png response from our own domain.
+  app.get('/api/og-image', async (req: Request, res: Response) => {
+    const rawImg = typeof req.query.img === 'string' ? req.query.img.trim() : '';
+    const cat = typeof req.query.cat === 'string' ? req.query.cat.trim() : '';
+    const fallbackUrl = getServerFallbackSocialImage(rawImg, cat);
+
+    const candidateUrls: string[] = [];
+    if (
+      rawImg &&
+      /^https?:\/\//i.test(rawImg) &&
+      !rawImg.toLowerCase().endsWith('.svg') &&
+      !rawImg.includes('/og-image.svg')
+    ) {
+      candidateUrls.push(rawImg);
+    }
+    candidateUrls.push(fallbackUrl);
+    if (fallbackUrl !== 'https://images.unsplash.com/photo-1504711434969-e33886168f5c?w=1200&h=630&fit=crop&q=85') {
+      candidateUrls.push('https://images.unsplash.com/photo-1504711434969-e33886168f5c?w=1200&h=630&fit=crop&q=85');
+    }
+
+    for (const targetUrl of candidateUrls) {
+      const cached = ogImageBufferCache.get(targetUrl);
+      if (cached && Date.now() - cached.ts < 3600_000) {
+        res.setHeader('Content-Type', cached.contentType);
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.send(cached.buffer);
+        return;
+      }
+
+      try {
+        const imgRes = await fetch(targetUrl, {
+          headers: {
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+            Accept: 'image/jpeg,image/png,image/webp,image/*;q=0.9,*/*;q=0.5',
+          },
+          redirect: 'follow',
+          signal: AbortSignal.timeout(5000),
+        });
+
+        if (imgRes.ok) {
+          const ct = (imgRes.headers.get('content-type') || 'image/jpeg').toLowerCase();
+          if (ct.startsWith('image/') && !ct.includes('svg')) {
+            const arrayBuf = await imgRes.arrayBuffer();
+            const buf = Buffer.from(arrayBuf);
+            if (buf.length > 200) {
+              const finalCt = ct.includes('png') ? 'image/png' : 'image/jpeg';
+              if (ogImageBufferCache.size > 120) {
+                const oldestKey = ogImageBufferCache.keys().next().value;
+                if (oldestKey) ogImageBufferCache.delete(oldestKey);
+              }
+              ogImageBufferCache.set(targetUrl, { buffer: buf, contentType: finalCt, ts: Date.now() });
+              res.setHeader('Content-Type', finalCt);
+              res.setHeader('Cache-Control', 'public, max-age=86400');
+              res.setHeader('Access-Control-Allow-Origin', '*');
+              res.send(buf);
+              return;
+            }
+          }
+        }
+      } catch {
+        // try next candidate
+      }
+    }
+
+    // Ultimate fallback: valid 1x1 PNG so response is always a valid raster image
+    const fallbackPng = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      'base64'
+    );
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.send(fallbackPng);
+  });
+
+  // Helper to resolve request origin accurately behind Cloud Run / reverse proxies
+  function getRequestOrigin(req: Request): string {
+    const forwardedProto = (req.headers['x-forwarded-proto'] as string)?.split(',')[0]?.trim();
+    const proto = forwardedProto || (req.get('host')?.includes('localhost') ? req.protocol : 'https');
+    const host = (req.headers['x-forwarded-host'] as string)?.split(',')[0]?.trim() || req.get('host') || 'puulp.it';
+    return `${proto}://${host}`;
+  }
+
+  // Helper to inject dynamic OpenGraph & Twitter Card meta tags into index.html for any shared URL
+  function injectDynamicOpenGraphHtml(rawHtml: string, req: Request): string {
+    const hostOrigin = getRequestOrigin(req);
+    const artParam = typeof req.query.art === 'string' ? req.query.art.trim() : typeof req.query.article === 'string' ? req.query.article.trim() : '';
+    const pageParam = typeof req.query.p === 'string' ? req.query.p.trim() : typeof req.query.page === 'string' ? req.query.page.trim() : '';
+    const queryTitle = typeof req.query.t === 'string' ? req.query.t.trim() : '';
+    const queryDesc = typeof req.query.d === 'string' ? req.query.d.trim() : '';
+    const queryImg = typeof req.query.img === 'string' ? req.query.img.trim() : '';
+
+    const registered = artParam
+      ? socialMetaRegistry.get(artParam.toLowerCase())
+      : pageParam
+      ? socialMetaRegistry.get(pageParam.toLowerCase())
+      : undefined;
+
+    const humanSlugTitle = (artParam || pageParam)
+      ? (artParam || pageParam)
+          .replace(/-[a-z0-9]{5,7}$/i, '')
+          .replace(/[-_]+/g, ' ')
+          .replace(/\b\w/g, (c) => c.toUpperCase())
+      : '';
+
+    const rawTitle =
+      queryTitle ||
+      registered?.title ||
+      (humanSlugTitle ? `${humanSlugTitle} — puulp.it` : 'puulp.it — Rassegna Stampa, Pagine Tematiche e Feed RSS');
+
+    const finalTitle = rawTitle.includes('puulp.it') ? rawTitle : `${rawTitle} — puulp.it`;
+
+    const finalDesc =
+      queryDesc ||
+      registered?.description ||
+      (humanSlugTitle
+        ? `Leggi "${humanSlugTitle}" e scopri tutti gli approfondimenti e le notizie in tempo reale su puulp.it.`
+        : 'Pagine tematiche con feed unificati, ricerca in tempo reale, condivisione articoli e notifiche istantanee su puulp.it.');
+
+    const rawTargetImg =
+      queryImg ||
+      registered?.image ||
+      getServerFallbackSocialImage(finalTitle, pageParam);
+
+    const proxiedOgImage = `${hostOrigin}/api/og-image?img=${encodeURIComponent(rawTargetImg)}${
+      pageParam ? `&cat=${encodeURIComponent(pageParam)}` : ''
+    }`;
+
+    const fullCanonicalUrl = `${hostOrigin}${req.originalUrl || '/'}`;
+    const ogType = artParam ? 'article' : 'website';
+
+    const escapedTitle = escapeXml(finalTitle);
+    const escapedDesc = escapeXml(finalDesc);
+    const escapedImg = escapeXml(proxiedOgImage);
+    const escapedUrl = escapeXml(fullCanonicalUrl);
+
+    let html = rawHtml;
+    html = html.replace(/<title>[\s\S]*?<\/title>/i, `<title>${escapedTitle}</title>`);
+    html = html.replace(
+      /<meta\s+name="description"\s+content="[^"]*"\s*\/?>/i,
+      `<meta name="description" content="${escapedDesc}" />`
+    );
+    html = html.replace(
+      /<meta\s+property="og:type"\s+content="[^"]*"\s*\/?>/i,
+      `<meta property="og:type" content="${ogType}" />`
+    );
+    html = html.replace(
+      /<meta\s+property="og:title"\s+content="[^"]*"\s*\/?>/i,
+      `<meta property="og:title" content="${escapedTitle}" />`
+    );
+    html = html.replace(
+      /<meta\s+property="og:description"\s+content="[^"]*"\s*\/?>/i,
+      `<meta property="og:description" content="${escapedDesc}" />`
+    );
+    html = html.replace(
+      /<meta\s+property="og:image"\s+content="[^"]*"\s*\/?>/i,
+      `<meta property="og:image" content="${escapedImg}" />\n    <meta property="og:url" content="${escapedUrl}" />`
+    );
+    html = html.replace(
+      /<meta\s+property="og:image:secure_url"\s+content="[^"]*"\s*\/?>/i,
+      `<meta property="og:image:secure_url" content="${escapedImg}" />`
+    );
+    html = html.replace(
+      /<meta\s+property="og:image:alt"\s+content="[^"]*"\s*\/?>/i,
+      `<meta property="og:image:alt" content="${escapedTitle}" />`
+    );
+    html = html.replace(
+      /<meta\s+name="twitter:title"\s+content="[^"]*"\s*\/?>/i,
+      `<meta name="twitter:title" content="${escapedTitle}" />`
+    );
+    html = html.replace(
+      /<meta\s+name="twitter:description"\s+content="[^"]*"\s*\/?>/i,
+      `<meta name="twitter:description" content="${escapedDesc}" />`
+    );
+    html = html.replace(
+      /<meta\s+name="twitter:image"\s+content="[^"]*"\s*\/?>/i,
+      `<meta name="twitter:image" content="${escapedImg}" />`
+    );
+    html = html.replace(
+      /<meta\s+name="twitter:image:alt"\s+content="[^"]*"\s*\/?>/i,
+      `<meta name="twitter:image:alt" content="${escapedTitle}" />`
+    );
+
+    return html;
+  }
 
   // Google AdSense ads.txt verification endpoint
   app.get('/ads.txt', (_req: Request, res: Response) => {
@@ -2939,13 +3227,34 @@ Rispondi SOLO con JSON valido:
   app.get(['/share/:slug', '/share/page/:slug', '/share/article/:slug'], (req: Request, res: Response) => {
     const slug = req.params.slug || 'puulp';
     const isArticle = req.path.includes('/article/');
-    const host = `${req.protocol}://${req.get('host')}`;
-    const cleanTitle = slug.replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-    const canonicalAppUrl = isArticle ? `${host}/?art=${encodeURIComponent(slug)}` : `${host}/?p=${encodeURIComponent(slug)}`;
+    const host = getRequestOrigin(req);
+    const registered = socialMetaRegistry.get(slug.toLowerCase());
+    const cleanTitle =
+      (typeof req.query.t === 'string' && req.query.t.trim()) ||
+      registered?.title ||
+      slug.replace(/-[a-z0-9]{5,7}$/i, '').replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 
-    const pageTitle = `${cleanTitle} — puulp.it`;
-    const description = `Scopri gli ultimi aggiornamenti, feed RSS in tempo reale e approfondimenti dedicati a ${cleanTitle} su puulp.it.`;
-    const ogImage = `${host}/og-image.svg`;
+    const pageParam = (typeof req.query.p === 'string' && req.query.p.trim()) || registered?.pageSlug || '';
+    const rawImg =
+      (typeof req.query.img === 'string' && req.query.img.trim()) ||
+      registered?.image ||
+      getServerFallbackSocialImage(cleanTitle, pageParam);
+
+    const targetUrlObj = new URL('/', host);
+    if (pageParam) targetUrlObj.searchParams.set('p', pageParam);
+    if (isArticle) {
+      targetUrlObj.searchParams.set('art', slug);
+    } else if (!pageParam) {
+      targetUrlObj.searchParams.set('p', slug);
+    }
+    const canonicalAppUrl = targetUrlObj.toString();
+
+    const pageTitle = cleanTitle.includes('puulp.it') ? cleanTitle : `${cleanTitle} — puulp.it`;
+    const description =
+      (typeof req.query.d === 'string' && req.query.d.trim()) ||
+      registered?.description ||
+      `Scopri gli ultimi aggiornamenti, feed RSS in tempo reale e approfondimenti dedicati a ${cleanTitle} su puulp.it.`;
+    const ogImage = `${host}/api/og-image?img=${encodeURIComponent(rawImg)}`;
 
     const html = `<!doctype html>
 <html lang="it">
@@ -2953,15 +3262,20 @@ Rispondi SOLO con JSON valido:
   <meta charset="UTF-8" />
   <title>${escapeXml(pageTitle)}</title>
   <meta name="description" content="${escapeXml(description)}" />
-  <link rel="canonical" href="${canonicalAppUrl}" />
+  <link rel="canonical" href="${escapeXml(canonicalAppUrl)}" />
 
   <!-- Open Graph / Facebook / LinkedIn / WhatsApp -->
   <meta property="og:site_name" content="puulp.it" />
   <meta property="og:type" content="${isArticle ? 'article' : 'website'}" />
   <meta property="og:title" content="${escapeXml(pageTitle)}" />
   <meta property="og:description" content="${escapeXml(description)}" />
-  <meta property="og:image" content="${ogImage}" />
-  <meta property="og:url" content="${canonicalAppUrl}" />
+  <meta property="og:image" content="${escapeXml(ogImage)}" />
+  <meta property="og:image:secure_url" content="${escapeXml(ogImage)}" />
+  <meta property="og:image:type" content="image/jpeg" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="${escapeXml(pageTitle)}" />
+  <meta property="og:url" content="${escapeXml(canonicalAppUrl)}" />
   <meta property="og:locale" content="it_IT" />
 
   <!-- Twitter / X Cards -->
@@ -2969,15 +3283,16 @@ Rispondi SOLO con JSON valido:
   <meta name="twitter:site" content="@puulp_it" />
   <meta name="twitter:title" content="${escapeXml(pageTitle)}" />
   <meta name="twitter:description" content="${escapeXml(description)}" />
-  <meta name="twitter:image" content="${ogImage}" />
+  <meta name="twitter:image" content="${escapeXml(ogImage)}" />
+  <meta name="twitter:image:alt" content="${escapeXml(pageTitle)}" />
 
-  <meta http-equiv="refresh" content="0; url=${canonicalAppUrl}" />
+  <meta http-equiv="refresh" content="0; url=${escapeXml(canonicalAppUrl)}" />
 </head>
 <body style="font-family: sans-serif; padding: 2rem; text-align: center; background: #fff8f0; color: #1c1917;">
   <h2>${escapeXml(pageTitle)}</h2>
   <p>${escapeXml(description)}</p>
-  <p><a href="${canonicalAppUrl}">Clicca qui per accedere alla pagina su puulp.it</a></p>
-  <script>window.location.replace("${canonicalAppUrl}");</script>
+  <p><a href="${escapeXml(canonicalAppUrl)}">Clicca qui per leggere l'articolo su puulp.it</a></p>
+  <script>window.location.replace(${JSON.stringify(canonicalAppUrl)});</script>
 </body>
 </html>`;
 
@@ -3010,6 +3325,21 @@ Rispondi SOLO con JSON valido:
       },
       appType: 'spa',
     });
+
+    // Intercept GET / and GET /index.html to inject dynamic OpenGraph & Twitter Card meta tags before Vite serves HTML
+    app.get(['/', '/index.html'], async (req: Request, res: Response, next) => {
+      try {
+        const indexPath = path.resolve(process.cwd(), 'index.html');
+        if (!fs.existsSync(indexPath)) return next();
+        const rawTemplate = fs.readFileSync(indexPath, 'utf-8');
+        const withOg = injectDynamicOpenGraphHtml(rawTemplate, req);
+        const transformed = await vite.transformIndexHtml(req.originalUrl, withOg);
+        res.status(200).set({ 'Content-Type': 'text/html; charset=utf-8' }).end(transformed);
+      } catch (e) {
+        next(e);
+      }
+    });
+
     app.use(vite.middlewares);
   } else {
     // Cache hashed immutable assets (Vite generates unique chunk hashes)
@@ -3018,14 +3348,27 @@ Rispondi SOLO con JSON valido:
       immutable: true,
     }));
 
+    // Intercept root "/" before express.static so index.html gets dynamic OpenGraph tags injected
+    app.get(['/', '/index.html'], (req: Request, res: Response) => {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      const indexPath = path.resolve(distDir, 'index.html');
+      const rawHtml = fs.readFileSync(indexPath, 'utf-8');
+      res.send(injectDynamicOpenGraphHtml(rawHtml, req));
+    });
+
     app.use(express.static(distDir, {
       maxAge: '1h',
+      index: false,
     }));
 
-    // SPA fallback: index.html with no-cache so updates propagate immediately
-    app.get('*', (_req, res) => {
+    // SPA fallback: index.html with dynamic OpenGraph meta injection
+    app.get('*', (req: Request, res: Response) => {
       res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-      res.sendFile(path.resolve(distDir, 'index.html'));
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      const indexPath = path.resolve(distDir, 'index.html');
+      const rawHtml = fs.readFileSync(indexPath, 'utf-8');
+      res.send(injectDynamicOpenGraphHtml(rawHtml, req));
     });
   }
 
